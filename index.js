@@ -1,9 +1,9 @@
-: const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
 
-// COLOCA AQUÍ TU NÚMERO (código de país + tus 10 dígitos)
-const NUMERO_BOT = "5218641141976"; 
+// Configuración de número celular para México
+const NUMERO_BOT = "528641141976";
 
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
@@ -32,16 +32,26 @@ async function iniciarBot() {
                 console.log(`TU CODIGO DE VINCULACION ES: ${code}`);
                 console.log(`=========================================\n`);
             } catch (err) {
-                console.log('Error generando código:', err);
+                console.log('Error generando código, reintentando con prefijo alterno...');
+                try {
+                    const codeAlt = await sock.requestPairingCode("5218641141976");
+                    console.log(`\n=========================================`);
+                    console.log(`TU CODIGO DE VINCULACION ES: ${codeAlt}`);
+                    console.log(`=========================================\n`);
+                } catch (e) {
+                    console.log('Fallo al solicitar código:', e.message);
+                }
             }
-        }, 4000);
+        }, 5000);
     }
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reconectar = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (reconectar) iniciarBot();
+            if (reconectar) {
+                iniciarBot();
+            }
         } else if (connection === 'open') {
             console.log('Bot Click&Cut conectado con exito a WhatsApp.');
         }
@@ -88,7 +98,7 @@ async function iniciarBot() {
                               `💛 *VIX (Perfil):*\n1M $9 | 2M $15 | 3M $19 | 12M $28\n` +
                               `💛 *VIX (Completa):*\n1M $13 | 2M $20 | 3M $29 | 12M $38\n` +
                               `━━━━━━━━━━━━━━━━━━\n` +
-                              `⭐ *Paramount+:*\n1M $13 | 2M $18 | 3M $23 | 12M $30\n` +
+                              `⭐ *Paramount+ (Perfil):*\n1M $13 | 2M $18 | 3M $23 | 12M $30\n` +
                               `⭐ *Paramount+ (Completa):*\n1M $45 | 2M $55 | 3M $65 | 12M $110\n` +
                               `━━━━━━━━━━━━━━━━━━\n` +
                               `🍿 *Crunchyroll (Perfil):*\n1M $17 | 2M $24 | 3M $32 | 12M $48\n` +
