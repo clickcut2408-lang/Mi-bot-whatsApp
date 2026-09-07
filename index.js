@@ -2,7 +2,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const pino = require('pino');
 const http = require('http');
 
-// Configuración de número celular para México
+// Configuración de tu número de WhatsApp
 const NUMERO_BOT = "528641141976";
 
 const port = process.env.PORT || 3000;
@@ -66,17 +66,111 @@ async function iniciarBot() {
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
         const comando = texto.toLowerCase().trim();
 
-        if (comando === '!menu' || comando === '!servicios') {
+        if (comando === '!menu' || comando === '!ayuda') {
             const menu = `🛒 *BIENVENIDO A CLICK&CUT* 🛒\n\n` +
-                         `Escribe cualquiera de estos comandos para consultar información:\n\n` +
-                         `📌 *!streaming* - Películas, series y TV (Netflix, Disney, MAX, etc.)\n` +
+                         `Escribe cualquiera de estos comandos en el chat o grupo:\n\n` +
+                         `📌 *!streaming* - Películas, series y TV (Netflix, Disney, MAX...)\n` +
                          `📌 *!musica* - Spotify, YouTube Premium y Deezer\n` +
                          `📌 *!apps* - Canva Pro, ChatGPT, Gemini, Office y Game Pass\n` +
-                         `📌 *!adultos* - Contenido +18\n` +
-                         `📌 *!catalogo* - Lista completa de precios\n` +
-                         `📌 *!pago* - Cuentas bancarias y transferencias\n` +
-                         `📌 *!asesor* - Hablar con atención al cliente`;
+                         `📌 *!tramites* - Gestiones, actas, certificados y licencias\n` +
+                         `📌 *!catalogo* - Lista completa de streaming y apps\n` +
+                         `📌 *!adultos* - Cuentas +18\n` +
+                         `📌 *!pago* - Cuentas para transferencias y depósitos\n` +
+                         `📌 *!reglas* - Reglas, entregas y garantías\n` +
+                         `📌 *!asesor* o *!admin* - Contacto con atención al cliente`;
             await sock.sendMessage(remitente, { text: menu });
+
+        } else if (comando === '!reglas') {
+            const reglas = `✂️✨ *¡BIENVENID@ A CLICK&CUT STREAMING!* ✨✂️\n` +
+                           `¡Gracias por confiar en nosotros! 💜 Lee estas breves reglas para cuidar tu servicio y mantener tu garantía activa:\n` +
+                           `━━━━━━━━━━━━━━━━━━━━\n` +
+                           `📌 *REGLAS BÁSICAS*\n` +
+                           `✂️ Prohibido modificar correo, contraseña, PIN o perfiles.\n` +
+                           `✂️ Prohibido compartir la cuenta o exceder pantallas permitidas.\n` +
+                           `✂️ Si hay alguna falla, repórtala antes de mover cualquier ajuste.\n` +
+                           `✂️ No te salgas del grupo (la garantía se anula de inmediato).\n` +
+                           `━━━━━━━━━━━━━━━━━━━━\n` +
+                           `🕒 *HORARIO Y ATENCIÓN*\n` +
+                           `💜 Por el momento no manejamos un horario fijo, pero te responderemos a la brevedad posible.\n` +
+                           `✨ ¡Estamos trabajando arduamente en la administración para que muy pronto su servidora y el equipo les brindemos soporte 24/7!\n` +
+                           `━━━━━━━━━━━━━━━━━━━━\n` +
+                           `📦 *ENTREGAS*\n` +
+                           `✂️ De 15 minutos a 3 horas (puede variar un poco en días de alta demanda).\n` +
+                           `━━━━━━━━━━━━━━━━━━━━\n` +
+                           `🛡️ *GARANTÍAS*\n` +
+                           `✂️ 1 mes ➜ 25 días\n` +
+                           `✂️ 2 meses ➜ 45 días\n` +
+                           `✂️ 3 meses ➜ 75 días\n` +
+                           `✂️ 6 meses ➜ 5 meses\n` +
+                           `✂️ 12 meses ➜ 10 meses\n` +
+                           `_(Cubre únicamente caídas del servicio; no aplica si cambias datos o haces mal uso de la cuenta)_\n` +
+                           `━━━━━━━━━━━━━━━━━━━━\n` +
+                           `💌 *AVISO IMPORTANTE*\n` +
+                           `✂️ Reporta fallas con captura de pantalla.\n` +
+                           `✂️ No hay reembolsos tras entregar el servicio.\n` +
+                           `✂️ Al recibir tu cuenta aceptas estas condiciones.\n\n` +
+                           `🍿 ¡Disfruta tu entretenimiento al máximo! ✂️✨`;
+            await sock.sendMessage(remitente, { text: reglas });
+
+        } else if (comando === '!tramites' || comando === '!servicios') {
+            const tramites = `✧˚｡⋆ *CLICK&CUT TRÁMITES Y SERVICIOS* ✧˚｡⋆\n` +
+                             `━━━━━━━━━━━━━━━━━━\n` +
+                             `🍒 *Actas & Educación:*\n` +
+                             `• Acta de nacimiento — $15\n` +
+                             `• Acta de matrimonio — $15\n` +
+                             `• Acta de divorcio — $15\n` +
+                             `• Acta de defunción — $15\n` +
+                             `• Certificado INEA — $45\n\n` +
+                             `📋 *Trámites Generales:*\n` +
+                             `• Localizar AFORE — $25\n` +
+                             `• Certificado COVID — $40\n` +
+                             `• Recibo CFE — $15\n` +
+                             `• Constancia de no derechohabiencia ISSSTE — $40\n` +
+                             `• Constancia de no deudor alimentario (DIF) — $45\n` +
+                             `• Talón de pago ISSSTE — $28\n` +
+                             `• Hoja REPUVE — $28\n` +
+                             `• CURP certificada — $15\n` +
+                             `• Número Seguro Social 2 hojas (NSS) — $32\n` +
+                             `• Vigencia de derechos IMSS — $32\n` +
+                             `• Semanas cotizadas IMSS — $32\n\n` +
+                             `⚖️ *Antecedentes No Penales:*\n` +
+                             `• Estatales — $70\n` +
+                             `• Federales — $85\n\n` +
+                             `🚗 *Vehículos y Licencias:*\n` +
+                             `• Permiso para circular sin placas (30 días) — $80\n` +
+                             `• Reposición tarjeta de circulación — $700\n` +
+                             `• Licencia — $750 + envío\n` +
+                             `• Licencia Guerrero Digital (3 y 5 años) — $200 / $230\n` +
+                             `• Títulos americanos de vehículos — $1,300\n\n` +
+                             `🛂 *Pasaporte y Nacionalidad:*\n` +
+                             `• Renovación de pasaporte — $800\n` +
+                             `• Doble nacionalidad — (Cotizar con asesor)\n` +
+                             `• Alta acta nacimiento (Jalisco) — (Cotizar con asesor)\n\n` +
+                             `🏠 *INFONAVIT:*\n` +
+                             `• Registro de cuenta Infonavit — $120\n` +
+                             `• Histórico de saldo — $120\n` +
+                             `• Nueva clave Infonavit — $120\n` +
+                             `• Desbloqueo de cuenta Infonavit — $120\n\n` +
+                             `📄 *RFC y SAT:*\n` +
+                             `• RFC original — $135\n` +
+                             `• RFC clon — $45\n` +
+                             `• Renovación e.firma (con contraseña) — $600\n` +
+                             `• Facturación / Refacturación — desde $250\n` +
+                             `• Hoja de retención IMSS — $140\n\n` +
+                             `🎓 *Certificados Verificables:*\n` +
+                             `• Primaria / Secundaria / Preparatoria / Bachillerato — $60 c/u\n` +
+                             `• Títulos y cédulas (2009–2023) — $85\n` +
+                             `• Certificado estudios para trabajar — $45\n` +
+                             `• Carta de recomendación (con firma y sello) — $57\n` +
+                             `• Buró de crédito — $85\n` +
+                             `• Constancia de inexistencia de matrimonio — $170\n\n` +
+                             `⛪ *Boletas Sacramentales:*\n` +
+                             `• Bautizo — $45\n` +
+                             `• Comunión — $45\n` +
+                             `• Confirmación — $45\n` +
+                             `━━━━━━━━━━━━━━━━━━\n` +
+                             `_Escribe *!pago* para transferir o *!asesor* para cotizar._`;
+            await sock.sendMessage(remitente, { text: tramites });
 
         } else if (comando === '!streaming') {
             const streaming = `📺 *STREAMING & SERIES* 📺\n` +
@@ -98,7 +192,7 @@ async function iniciarBot() {
                               `💛 *VIX (Perfil):*\n1M $9 | 2M $15 | 3M $19 | 12M $28\n` +
                               `💛 *VIX (Completa):*\n1M $13 | 2M $20 | 3M $29 | 12M $38\n` +
                               `━━━━━━━━━━━━━━━━━━\n` +
-                              `⭐ *Paramount+ (Perfil):*\n1M $13 | 2M $18 | 3M $23 | 12M $30\n` +
+                              `⭐ *Paramount+:*\n1M $13 | 2M $18 | 3M $23 | 12M $30\n` +
                               `⭐ *Paramount+ (Completa):*\n1M $45 | 2M $55 | 3M $65 | 12M $110\n` +
                               `━━━━━━━━━━━━━━━━━━\n` +
                               `🍿 *Crunchyroll (Perfil):*\n1M $17 | 2M $24 | 3M $32 | 12M $48\n` +
@@ -246,8 +340,8 @@ async function iniciarBot() {
                          `¡Muchas gracias por elegir Click & Cut! 💖`;
             await sock.sendMessage(remitente, { text: pago });
 
-        } else if (comando === '!asesor') {
-            await sock.sendMessage(remitente, { text: `👨‍💻 *Click&Cut:* Un asesor te atenderá personalmente en un momento. Por favor déjanos tu duda o comprobante aquí escrito.` });
+        } else if (comando === '!asesor' || comando === '!admin') {
+            await sock.sendMessage(remitente, { text: `👨‍💻 *Click&Cut:* Un asesor te atenderá personalmente en un momento. Por favor déjanos escrito qué trámite o cuenta requieres.` });
         }
     });
 }
