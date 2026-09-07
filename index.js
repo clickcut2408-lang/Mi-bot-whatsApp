@@ -1,3 +1,46 @@
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const http = require('http');
+
+// Servidor requerido por Render
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot Click&Cut activo');
+}).listen(port, () => {
+    console.log(`Servidor activo en el puerto ${port}`);
+});
+
+async function iniciarBot() {
+    const { state, saveCreds } = await useMultiFileAuthState('sesion_auth');
+    
+    const sock = makeWASocket({
+        logger: pino({ level: 'silent' }),
+        auth: state,
+        printQRInTerminal: false
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const reconectar = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (reconectar) iniciarBot();
+        } else if (connection === 'open') {
+            console.log('Bot Click&Cut conectado con exito a WhatsApp.');
+        }
+    });
+
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
+        const msg = messages[0];
+        if (!msg.message || msg.key.fromMe) return;
+
+        const remitente = msg.key.remoteJid;
+        const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+        const comando = texto.toLowerCase().trim();
+
         if (comando === '!menu' || comando === '!servicios') {
             const menu = `🛒 *BIENVENIDO A CLICK&CUT* 🛒\n\n` +
                          `Escribe cualquiera de estos comandos para consultar información:\n\n` +
@@ -181,3 +224,8 @@
         } else if (comando === '!asesor') {
             await sock.sendMessage(remitente, { text: `👨‍💻 *Click&Cut:* Un asesor te atenderá personalmente en un momento. Por favor déjanos tu duda o comprobante aquí escrito.` });
         }
+    });
+}
+
+iniciarBot();
+        
