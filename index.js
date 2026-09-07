@@ -18,7 +18,9 @@ async function iniciarBot() {
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: false
+        printQRInTerminal: false,
+        syncFullHistory: false, // Evita saturación con historial antiguo
+        markOnlineOnConnect: true
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -55,28 +57,41 @@ async function iniciarBot() {
         }
     });
 
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    sock.ev.on('messages.upsert', async (m) => {
         try {
-            if (type !== 'notify') return;
-            const msg = messages[0];
-            if (!msg || !msg.message || msg.key.fromMe) return;
+            const msg = m.messages ? m.messages[0] : null;
+            if (!msg || !msg.message) return;
+
+            // Si es enviado por el propio bot en un chat individual, se ignora
+            if (msg.key.fromMe) return;
 
             const remitente = msg.key.remoteJid;
-            
-            // Extraer texto de cualquier tipo de mensaje
-            const texto = msg.message.conversation || 
-                          msg.message.extendedTextMessage?.text || 
-                          msg.message.imageMessage?.caption || 
+
+            // Desenvolver mensajes anidados (temporales / multimedia / vista única)
+            let mensajeContenido = msg.message;
+            if (mensajeContenido.ephemeralMessage) {
+                mensajeContenido = mensajeContenido.ephemeralMessage.message;
+            }
+            if (mensajeContenido.viewOnceMessage) {
+                mensajeContenido = mensajeContenido.viewOnceMessage.message;
+            }
+
+            // Extraer texto
+            const texto = mensajeContenido.conversation || 
+                          mensajeContenido.extendedTextMessage?.text || 
+                          mensajeContenido.imageMessage?.caption || 
                           '';
 
-            // Limpiar acentos y pasar a minúsculas
+            // Limpiar comando (minúsculas y sin acentos)
             const comando = texto
                 .toLowerCase()
                 .trim()
                 .normalize("NFD")
                 .replace(/[\u0300-\u036f]/g, "");
 
-            console.log(`--> Mensaje recibido de ${remitente}: "${texto}" (Comando procesado: "${comando}")`);
+            if (!comando) return;
+
+            console.log(`[MENSAJE DETECTADO] De: ${remitente} | Texto: "${texto}" | Procesado: "${comando}"`);
 
             if (comando === '!menu' || comando === 'menu' || comando === '!ayuda' || comando === 'ayuda') {
                 const menu = `🛒 *BIENVENIDO A CLICK&CUT* 🛒\n\n` +
@@ -91,7 +106,7 @@ async function iniciarBot() {
                              `📌 *!reglas* - Reglas, entregas y garantías\n` +
                              `📌 *!asesor* o *!admin* - Contacto con atención al cliente`;
                 await sock.sendMessage(remitente, { text: menu });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Menú entregado a ${remitente}`);
 
             } else if (comando === '!reglas' || comando === 'reglas') {
                 const reglas = `✂️✨ *¡BIENVENID@ A CLICK&CUT STREAMING!* ✨✂️\n` +
@@ -124,7 +139,7 @@ async function iniciarBot() {
                                `✂️ Al recibir tu cuenta aceptas estas condiciones.\n\n` +
                                `🍿 ¡Disfruta tu entretenimiento al máximo! ✂️✨`;
                 await sock.sendMessage(remitente, { text: reglas });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Reglas entregadas a ${remitente}`);
 
             } else if (comando === '!tramites' || comando === 'tramites' || comando === '!servicios' || comando === 'servicios') {
                 const tramites = `✧˚｡⋆ *CLICK&CUT TRÁMITES Y SERVICIOS* ✧˚｡⋆\n` +
@@ -185,7 +200,7 @@ async function iniciarBot() {
                                  `━━━━━━━━━━━━━━━━━━\n` +
                                  `_Escribe *!pago* para transferir o *!asesor* para cotizar._`;
                 await sock.sendMessage(remitente, { text: tramites });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Trámites entregados a ${remitente}`);
 
             } else if (comando === '!streaming' || comando === 'streaming') {
                 const streaming = `📺 *STREAMING & SERIES* 📺\n` +
@@ -222,7 +237,7 @@ async function iniciarBot() {
                                   `📺 *Claro+Canales (Completa):* 1M $70\n\n` +
                                   `_Escribe *!pago* para ver las cuentas bancarias._`;
                 await sock.sendMessage(remitente, { text: streaming });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Streaming entregado a ${remitente}`);
 
             } else if (comando === '!musica' || comando === 'musica') {
                 const musica = `🎶 *MÚSICA Y AUDIO* 🎶\n` +
@@ -239,7 +254,7 @@ async function iniciarBot() {
                                `1M $14 | 2M $21 | 3M $26 | 6M $30 | Anual $45\n\n` +
                                `_Escribe *!pago* para contratar._`;
                 await sock.sendMessage(remitente, { text: musica });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Música entregada a ${remitente}`);
 
             } else if (comando === '!apps' || comando === 'apps') {
                 const apps = `🛠️ *HERRAMIENTAS, APPS & JUEGOS* 🛠️\n` +
@@ -265,7 +280,7 @@ async function iniciarBot() {
                              `🎮 *Game Pass Code:* $98\n\n` +
                              `_Escribe *!pago* para adquirir tu cuenta._`;
                 await sock.sendMessage(remitente, { text: apps });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Apps entregadas a ${remitente}`);
 
             } else if (comando === '!adultos' || comando === 'adultos') {
                 const adultos = `🔞 *CONTENIDO +18 (Solo Mayores)* 🔞\n` +
@@ -276,7 +291,7 @@ async function iniciarBot() {
                                 `🔥 *Pornhub (Perfil):*\n1M $15 | 2M $28 | 3M $32\n\n` +
                                 `_Escribe *!pago* para ver las opciones de compra._`;
                 await sock.sendMessage(remitente, { text: adultos });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Adultos entregado a ${remitente}`);
 
             } else if (comando === '!catalogo' || comando === 'catalogo') {
                 const stockCompleto = `🩷 *APPSTOCK CLICK&CUT* 🩷\n` +
@@ -347,7 +362,7 @@ async function iniciarBot() {
                                       `💜 *Todo sujeto a disponibilidad*\n` +
                                       `💜 *Pregunta antes de transferir 🥰*`;
                 await sock.sendMessage(remitente, { text: stockCompleto });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Catálogo entregado a ${remitente}`);
 
             } else if (comando === '!pago' || comando === 'pago') {
                 const pago = `🌸🪞 *TRANSFERENCIAS Y DEPÓSITOS* 🪞🌸\n\n` +
@@ -359,11 +374,11 @@ async function iniciarBot() {
                              `⚠️ *Importante:* Una vez realizada la transferencia, por favor envíanos tu comprobante de pago para poder validar tu compra.\n\n` +
                              `¡Muchas gracias por elegir Click & Cut! 💖`;
                 await sock.sendMessage(remitente, { text: pago });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Pago entregado a ${remitente}`);
 
             } else if (comando === '!asesor' || comando === '!admin' || comando === 'asesor' || comando === 'admin') {
                 await sock.sendMessage(remitente, { text: `👨‍💻 *Click&Cut:* Un asesor te atenderá personalmente en un momento. Por favor déjanos escrito qué trámite o cuenta requieres.` });
-                console.log(`Respuesta enviada a ${remitente}`);
+                console.log(`[ENVIADO] Asesor entregado a ${remitente}`);
             }
         } catch (error) {
             console.log('Error procesando mensaje:', error.message);
