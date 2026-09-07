@@ -2,7 +2,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } 
 const pino = require('pino');
 const http = require('http');
 
-const NUMERO_BOT = "528641114514";
+const NUMERO_BOT = "528641141976";
 const PORT = process.env.PORT || 3000;
 
 // Servidor HTTP para Render
@@ -37,7 +37,7 @@ async function arrancarBot() {
             } catch (err) {
                 console.log('[ERROR VINCULACION] Reintentando codigo...');
                 try {
-                    const pairingCodeAlt = await sock.requestPairingCode("5218641114514");
+                    const pairingCodeAlt = await sock.requestPairingCode("5218641141976");
                     console.log('\n=========================================');
                     console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCodeAlt} <<<`);
                     console.log('=========================================\n');
@@ -343,7 +343,7 @@ async function arrancarBot() {
                                `• Incapacidad de 4 a 9 días — $50\n` +
                                `• Incapacidad de 9 días en adelante — (Se cotiza con asesor)\n` +
                                `• Hoja de discapacidad — $100\n\n` +
-                               `👨‍👩‍👧 *Documentos Personales:* \n` +
+                               `👨‍👩‍👧 *Documentos Personales:*\n` +
                                `• Hoja de concubinato — $130\n` +
                                `• No deudor alimenticio Edomex — $60\n` +
                                `• No deudor alimenticio Federal — $60\n` +
@@ -636,7 +636,7 @@ async function arrancarBot() {
             else if (['.contacto'].includes(texto)) {
                 const contacto = `📱✨ *CANALES Y CONTACTO CLICK&CUT* ✨📱\n` +
                                  `━━━━━━━━━━━━━━━━━━━━\n` +
-                                 `💬 *WhatsApp Atención:* +52 864 111 4514\n` +
+                                 `💬 *WhatsApp Atención:* +52 864 114 1976\n` +
                                  `🛍️ *Catálogo digital:* Escribe *.catalogo*\n` +
                                  `📄 *Servicios de papelería y trámites:* Escribe *.tramites*\n\n` +
                                  `_¡Guarda nuestro contacto para ver promociones y novedades en los estados!_ 💖`;
