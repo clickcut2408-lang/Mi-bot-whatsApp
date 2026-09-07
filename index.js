@@ -4,11 +4,11 @@ const http = require('http');
 const fs = require('fs');
 
 const NUMERO_BOT = "528641141976";
-const NUMERO_ADMIN = "528641141976"; // Número autorizado para editar
+const NUMERO_ADMIN = "528641141976"; // Número autorizado para comandos admin y edición
 const PORT = process.env.PORT || 3000;
 const RUTA_DB = './comandos.json';
 
-// Carga o inicialización de comandos personalizados
+// Carga o inicialización de base de comandos personalizados
 let comandosPersonalizados = {};
 if (fs.existsSync(RUTA_DB)) {
     try {
@@ -79,7 +79,7 @@ async function arrancarBot() {
         }
     });
 
-    // Bienvenida con mención y audio en grupos
+    // Bienvenida automática en grupos
     sock.ev.on('group-participants.update', async (update) => {
         try {
             const { id, participants, action } = update;
@@ -94,7 +94,6 @@ async function arrancarBot() {
                         mentions: [participante]
                     });
 
-                    // Si existe bienvenida.mp3 lo manda como nota de voz
                     if (fs.existsSync('./bienvenida.mp3')) {
                         await delay(1000);
                         await sock.sendMessage(id, {
@@ -110,7 +109,7 @@ async function arrancarBot() {
         }
     });
 
-    // Procesador de mensajes
+    // Procesamiento de mensajes y comandos
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages ? chatUpdate.messages[0] : null;
@@ -141,10 +140,42 @@ async function arrancarBot() {
             console.log(`[COMANDO] ${remitente}: "${textoOriginal}"`);
 
             // ==========================================
-            // COMANDOS DE ADMINISTRACIÓN Y CONTROL
+            // COMANDOS DE ADMINISTRACIÓN EXCLUSIVOS
             // ==========================================
 
-            // EDITAR COMANDOS DESDE WHATSAPP (Solo Admin)
+            // 1. DESTRUIR / VACIAR GRUPO COMPLETO
+            if (texto === '.destruir' && esAdminAutorizado) {
+                if (!esGrupo) {
+                    await sock.sendMessage(remitente, { text: '⚠️ Este comando solo se puede usar dentro del grupo que deseas vaciar.' });
+                    return;
+                }
+
+                try {
+                    await sock.sendMessage(remitente, { text: '⏳ *Vaciando grupo... expulsando a todos los miembros.*' });
+
+                    const metadata = await sock.groupMetadata(remitente);
+                    const botId = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+
+                    // Selecciona a todos excepto al bot y al administrador autorizado
+                    const aExpulsar = metadata.participants
+                        .map(p => p.id)
+                        .filter(id => !id.includes(botId) && !id.includes(NUMERO_ADMIN));
+
+                    if (aExpulsar.length > 0) {
+                        await sock.groupParticipantsUpdate(remitente, aExpulsar, 'remove');
+                    }
+
+                    await sock.sendMessage(remitente, { text: '✅ Miembros eliminados. El bot procederá a salirse.' });
+                    await delay(1500);
+                    await sock.groupLeave(remitente);
+                } catch (err) {
+                    console.log('[ERROR AL DESTRUIR GRUPO]', err.message);
+                    await sock.sendMessage(remitente, { text: '⚠️ No pude expulsar a todos. Asegúrate de que el bot tenga rol de Administrador en el grupo.' });
+                }
+                return;
+            }
+
+            // 2. EDITAR COMANDOS DESDE WHATSAPP
             if (textoOriginal.startsWith('.editar') && esAdminAutorizado) {
                 const resto = textoOriginal.slice(7).trim();
                 const primerEspacio = resto.indexOf(' ');
@@ -168,7 +199,7 @@ async function arrancarBot() {
                 return;
             }
 
-            // LISTAR GRUPOS
+            // 3. LISTAR GRUPOS
             if (texto === '.grupos' && esAdminAutorizado) {
                 try {
                     const grupos = await sock.groupFetchAllParticipating();
@@ -184,7 +215,7 @@ async function arrancarBot() {
                 return;
             }
 
-            // CERRAR GRUPO
+            // 4. CERRAR GRUPO
             if (texto.startsWith('.cerrar') && esAdminAutorizado) {
                 const partes = textoOriginal.trim().split(/\s+/);
                 let targetJid = esGrupo ? remitente : partes[1];
@@ -210,7 +241,7 @@ async function arrancarBot() {
                 return;
             }
 
-            // ABRIR GRUPO
+            // 5. ABRIR GRUPO
             if (texto.startsWith('.abrir') && esAdminAutorizado) {
                 const partes = textoOriginal.trim().split(/\s+/);
                 let targetJid = esGrupo ? remitente : partes[1];
@@ -236,7 +267,7 @@ async function arrancarBot() {
                 return;
             }
 
-            // Evitar que el bot se responda a sí mismo en los menús generales
+            // Evitar que el bot se responda a sí mismo en los catálogos ordinarios
             if (esPropio) return;
 
             // ==========================================
@@ -249,7 +280,7 @@ async function arrancarBot() {
             }
 
             // ==========================================
-            // COMANDOS POR DEFECTO
+            // CATÁLOGOS Y SERVICIOS POR DEFECTO
             // ==========================================
 
             if (['.menu', '.ayuda'].includes(texto)) {
