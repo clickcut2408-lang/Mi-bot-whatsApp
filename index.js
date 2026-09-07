@@ -1,9 +1,12 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal');
 const http = require('http');
 
-// Servidor web basico para Render
+// COLOCA AQUÍ TU NÚMERO (código de país + número sin espacios ni signos)
+// Ejemplo México: "521xxxxxxxxxx" o "52xxxxxxxxxx"
+const NUMERO_BOT = "528641141976";
+
+// Servidor para Render
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -17,19 +20,28 @@ async function iniciarBot() {
     
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
-        auth: state
+        auth: state,
+        printQRInTerminal: false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
+    // Solicitar código de vinculación por número
+    if (!sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode(NUMERO_BOT);
+                console.log(`\n=========================================`);
+                console.log(`TU CODIGO DE VINCULACION ES: ${code}`);
+                console.log(`=========================================\n`);
+            } catch (err) {
+                console.log('Error generando código:', err);
+            }
+        }, 3000);
+    }
+
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        // Dibuja el codigo QR en pantalla
-        if (qr) {
-            qrcode.generate(qr, { small: true });
-        }
-
+        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reconectar = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (reconectar) iniciarBot();
