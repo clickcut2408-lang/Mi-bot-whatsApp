@@ -5,7 +5,7 @@ const http = require('http');
 const NUMERO_BOT = "528641141976";
 const PORT = process.env.PORT || 3000;
 
-// Servidor HTTP para Render
+// Servidor HTTP para mantener vivo el servicio en Render
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot Click&Cut en linea');
@@ -66,7 +66,7 @@ async function arrancarBot() {
         }
     });
 
-    // Bienvenida automática a nuevos miembros en grupos
+    // Bienvenida automática a nuevos participantes en grupos
     sock.ev.on('group-participants.update', async (update) => {
         try {
             const { id, participants, action } = update;
@@ -91,10 +91,11 @@ async function arrancarBot() {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages ? chatUpdate.messages[0] : null;
-            if (!msg || !msg.message || msg.key.fromMe) return;
+            if (!msg || !msg.message) return;
 
             const remitente = msg.key.remoteJid;
             const esGrupo = remitente.endsWith('@g.us');
+            const esPropio = msg.key.fromMe;
 
             let cuerpo = msg.message;
             if (cuerpo.ephemeralMessage) cuerpo = cuerpo.ephemeralMessage.message;
@@ -105,7 +106,6 @@ async function arrancarBot() {
                                   cuerpo.imageMessage?.caption ||
                                   '';
 
-            // Requiere prefijo de punto (.)
             if (!textoOriginal.startsWith('.')) return;
 
             const texto = textoOriginal
@@ -114,9 +114,100 @@ async function arrancarBot() {
                 .normalize("NFD")
                 .replace(/[\u0300-\u036f]/g, "");
 
-            console.log(`[COMANDO] ${remitente}: "${textoOriginal}"`);
+            console.log(`[COMANDO] ${remitente} (fromMe: ${esPropio}): "${textoOriginal}"`);
 
-            // 1. MENÚ PRINCIPAL
+            // ==========================================
+            // COMANDOS DE CONTROL DE GRUPO (PERMITEN fromMe Y PRIVADO)
+            // ==========================================
+
+            // 1. LISTAR GRUPOS PARA SABER CUÁL GESTIONAR
+            if (texto === '.grupos') {
+                try {
+                    const grupos = await sock.groupFetchAllParticipating();
+                    let respuesta = `📋 *GRUPOS ACTIVOS DE CLICK&CUT*\n━━━━━━━━━━━━━━━━━━━━\n`;
+                    for (const id in grupos) {
+                        respuesta += `🔹 *${grupos[id].subject}*\nID: \`${id}\`\n\n`;
+                    }
+                    respuesta += `_Usa *.abrir <id>* o *.cerrar <id>* para gestionarlos._`;
+                    await sock.sendMessage(remitente, { text: respuesta });
+                } catch (e) {
+                    await sock.sendMessage(remitente, { text: '⚠️ No pude obtener la lista de grupos.' });
+                }
+                return;
+            }
+
+            // 2. CERRAR GRUPO
+            if (texto.startsWith('.cerrar')) {
+                const partes = textoOriginal.trim().split(/\s+/);
+                let targetJid = esGrupo ? remitente : partes[1];
+
+                if (!targetJid || !targetJid.endsWith('@g.us')) {
+                    // Si se envía por privado sin ID, intenta cerrar el primer grupo disponible
+                    const grupos = await sock.groupFetchAllParticipating();
+                    const ids = Object.keys(grupos);
+                    if (ids.length === 1) {
+                        targetJid = ids[0];
+                    } else {
+                        await sock.sendMessage(remitente, { 
+                            text: `⚠️ Si estás en privado, usa:\n*.cerrar ID_DEL_GRUPO*\n\nConsulta los IDs con *.grupos*` 
+                        });
+                        return;
+                    }
+                }
+
+                try {
+                    await sock.groupSettingUpdate(targetJid, 'announcement');
+                    const avisoCierre = `🔒 *GRUPO CERRADO* 🔒\n━━━━━━━━━━━━━━━━━━━━\nEl grupo ha sido cerrado por administración. Los mensajes quedan pausados por el momento.\n\n✨ Para consultas urgentes o pedidos, escribe a un *.asesor* por mensaje privado. ¡Volvemos pronto! 💖`;
+                    await sock.sendMessage(targetJid, { text: avisoCierre });
+                    if (!esGrupo) {
+                        await sock.sendMessage(remitente, { text: `✅ Grupo cerrado con éxito.` });
+                    }
+                } catch (err) {
+                    await sock.sendMessage(remitente, { text: '⚠️ Error al cerrar el grupo. Verifica que el bot sea Administrador.' });
+                }
+                return;
+            }
+
+            // 3. ABRIR GRUPO
+            if (texto.startsWith('.abrir')) {
+                const partes = textoOriginal.trim().split(/\s+/);
+                let targetJid = esGrupo ? remitente : partes[1];
+
+                if (!targetJid || !targetJid.endsWith('@g.us')) {
+                    // Si se envía por privado sin ID, intenta abrir el primer grupo disponible
+                    const grupos = await sock.groupFetchAllParticipating();
+                    const ids = Object.keys(grupos);
+                    if (ids.length === 1) {
+                        targetJid = ids[0];
+                    } else {
+                        await sock.sendMessage(remitente, { 
+                            text: `⚠️ Si estás en privado, usa:\n*.abrir ID_DEL_GRUPO*\n\nConsulta los IDs con *.grupos*` 
+                        });
+                        return;
+                    }
+                }
+
+                try {
+                    await sock.groupSettingUpdate(targetJid, 'not_announcement');
+                    const avisoApertura = `🔓 *GRUPO ABIERTO* 🔓\n━━━━━━━━━━━━━━━━━━━━\nEl chat ya se encuentra disponible para todos.\n\n🍿 Pueden enviar sus dudas, comprobantes o consultar precios con *.menu*. ¡Excelente día a tod@s! 🎉`;
+                    await sock.sendMessage(targetJid, { text: avisoApertura });
+                    if (!esGrupo) {
+                        await sock.sendMessage(remitente, { text: `✅ Grupo abierto con éxito.` });
+                    }
+                } catch (err) {
+                    await sock.sendMessage(remitente, { text: '⚠️ Error al abrir el grupo. Verifica que el bot sea Administrador.' });
+                }
+                return;
+            }
+
+            // Evitar que el bot responda al resto de sus propios mensajes para no hacer eco
+            if (esPropio) return;
+
+            // ==========================================
+            // CATÁLOGOS Y ATENCIÓN A CLIENTES
+            // ==========================================
+
+            // MENÚ PRINCIPAL
             if (['.menu', '.ayuda'].includes(texto)) {
                 const menu = `🛒 *BIENVENIDO A CLICK&CUT* 🛒\n\n` +
                              `Consulta la información con los siguientes comandos:\n\n` +
@@ -143,7 +234,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: menu });
             }
 
-            // 2. COMBOS Y DÚOS
+            // COMBOS Y DÚOS
             else if (['.combos', '.duos', '.promos'].includes(texto)) {
                 const combos = `🎀✨ *COMBOS CLICK&CUT* ✨🎀\n` +
                                `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -185,7 +276,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: combos });
             }
 
-            // 3. STREAMING
+            // STREAMING
             else if (['.streaming'].includes(texto)) {
                 const streaming = `📺 *STREAMING & SERIES* 📺\n` +
                                   `━━━━━━━━━━━━━━━━━━\n` +
@@ -198,7 +289,7 @@ async function arrancarBot() {
                                   `🏰 *Disney+ Premium (Completa):*\n1M $56 | 2M $78 | 3M $89 | 12M $155\n` +
                                   `━━━━━━━━━━━━━━━━━━\n` +
                                   `📺 *MAX Premium (Perfil):*\n1M $15 | 2M $25 | 3M $34 | 12M $55\n` +
-                                  `📺 *MAX Premium (Completa):*\n1M $45 | 2M $59 | 3M $78 | 12M $120\n` +
+                                  `📺 *MAX Completa:* 1M $45 | 2M $59 | 3M $78 | 12M $120\n` +
                                   `━━━━━━━━━━━━━━━━━━\n` +
                                   `📦 *Prime Video (Perfil):*\n1M $10 | 2M $13 | 3M $19 | 12M $30\n` +
                                   `📦 *Prime Video Completa:*\n1M $28 | 2M $35 | 3M $45 | 12M $95\n` +
@@ -223,7 +314,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: streaming });
             }
 
-            // 4. MÚSICA
+            // MÚSICA
             else if (['.musica'].includes(texto)) {
                 const musica = `🎶 *MÚSICA Y AUDIO* 🎶\n` +
                                `━━━━━━━━━━━━━━━━━━\n` +
@@ -241,7 +332,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: musica });
             }
 
-            // 5. APLICACIONES Y HERRAMIENTAS
+            // APLICACIONES Y HERRAMIENTAS
             else if (['.apps'].includes(texto)) {
                 const apps = `🛠️ *HERRAMIENTAS, APPS & JUEGOS* 🛠️\n` +
                              `━━━━━━━━━━━━━━━━━━\n` +
@@ -266,7 +357,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: apps });
             }
 
-            // 6. TRÁMITES Y SERVICIOS
+            // TRÁMITES Y SERVICIOS
             else if (['.tramites', '.servicios'].includes(texto)) {
                 const tramites = `✧˚｡⋆ *CLICK&CUT TRÁMITES Y SERVICIOS* ✧˚｡⋆\n` +
                                  `━━━━━━━━━━━━━━━━━━\n` +
@@ -326,7 +417,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: tramites });
             }
 
-            // 7. DOCUMENTOS MÉDICOS Y EXTRAS
+            // DOCUMENTOS MÉDICOS Y EXTRAS
             else if (['.extras', '.medicos'].includes(texto)) {
                 const extras = `💗🩺 *DOCUMENTOS MÉDICOS & PERSONALES* 🩺💗\n` +
                                `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -352,7 +443,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: extras });
             }
 
-            // 8. TIEMPO AIRE / RECARGAS
+            // TIEMPO AIRE / RECARGAS
             else if (['.recargas', '.tiempoaire'].includes(texto)) {
                 const recargas = `✨ *CLICK&CUT | RECARGAS AL MEJOR PRECIO* ✨\n` +
                                  `Más megas, más saldo, más ahorro. Rápido, seguro y confiable.\n` +
@@ -381,7 +472,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: recargas });
             }
 
-            // 9. DIAMANTES FREE FIRE
+            // DIAMANTES FREE FIRE
             else if (['.setdiamantes', '.diamantes', '.freefire'].includes(texto)) {
                 const diamantes = `💎 *DIAMANTES CLICK&CUT* 💎\n` +
                                   `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -404,7 +495,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: diamantes });
             }
 
-            // 10. MEGA PACK LIBROS / PDF
+            // MEGA PACK LIBROS / PDF
             else if (['.libros', '.pdf', '.megapack', '.pack'].includes(texto)) {
                 const libros = `🔥 *¡MEGA PACK DE 1000 ARCHIVOS EN PDF!* 🔥\n` +
                                `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -422,7 +513,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: libros });
             }
 
-            // 11. REDES SOCIALES (SEGUIDORES/LIKES)
+            // REDES SOCIALES
             else if (['.redes', '.seguidores'].includes(texto)) {
                 const redes = `🚀✨ *SEGUIDORES & CRECIMIENTO EN REDES SOCIALES* ✨🚀\n` +
                               `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -470,7 +561,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: redes });
             }
 
-            // 12. NÚMEROS VIRTUALES
+            // NÚMEROS VIRTUALES
             else if (['.numeros', '.virtuales'].includes(texto)) {
                 const virtuales = `📱✨ *NÚMEROS VIRTUALES CLICK&CUT* ✨📱\n` +
                                   `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -482,7 +573,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: virtuales });
             }
 
-            // 13. CATÁLOGO COMPLETO
+            // CATÁLOGO COMPLETO
             else if (['.catalogo'].includes(texto)) {
                 const stockCompleto = `🩷 *APPSTOCK CLICK&CUT* 🩷\n` +
                                       `━━━━━━━━━━━━━━━━━━\n` +
@@ -525,7 +616,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: stockCompleto });
             }
 
-            // 14. CONTENIDO +18
+            // CONTENIDO +18
             else if (['.adultos'].includes(texto)) {
                 const adultos = `🔞 *CONTENIDO +18 (Solo Mayores)* 🔞\n` +
                                 `━━━━━━━━━━━━━━━━━━\n` +
@@ -537,7 +628,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: adultos });
             }
 
-            // 15. DATOS DE PAGO
+            // DATOS DE PAGO
             else if (['.pago'].includes(texto)) {
                 const pago = `🌸🪞 *TRANSFERENCIAS Y DEPÓSITOS* 🪞🌸\n\n` +
                              `🏦 *Banco:* Spin by Oxxo o STP\n` +
@@ -550,7 +641,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: pago });
             }
 
-            // 16. GARANTÍA
+            // GARANTÍA
             else if (['.garantia'].includes(texto)) {
                 const garantia = `🛡️ *COBERTURA DE GARANTÍAS CLICK&CUT* 🛡️\n` +
                                  `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -567,7 +658,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: garantia });
             }
 
-            // 17. PREGUNTAS FRECUENTES (FAQ / DUDAS)
+            // PREGUNTAS FRECUENTES (FAQ / DUDAS)
             else if (['.dudas', '.faq'].includes(texto)) {
                 const dudas = `❓ *PREGUNTAS FRECUENTES Y DUDAS COMUNES* ❓\n` +
                               `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -590,7 +681,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: dudas });
             }
 
-            // 18. REGLAS
+            // REGLAS
             else if (['.reglas'].includes(texto)) {
                 const reglas = `✂️✨ *¡BIENVENID@ A CLICK&CUT STREAMING!* ✨✂️\n` +
                                `¡Gracias por confiar en nosotros! 💜 Lee estas breves reglas para cuidar tu servicio y mantener tu garantía activa:\n` +
@@ -622,7 +713,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: reglas });
             }
 
-            // 19. HORARIO
+            // HORARIO
             else if (['.horario', '.atencion'].includes(texto)) {
                 const horario = `⏰ *HORARIO DE ATENCIÓN & ENTREGAS* ⏰\n` +
                                 `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -632,7 +723,7 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: horario });
             }
 
-            // 20. CONTACTO
+            // CONTACTO
             else if (['.contacto'].includes(texto)) {
                 const contacto = `📱✨ *CANALES Y CONTACTO CLICK&CUT* ✨📱\n` +
                                  `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -643,47 +734,11 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: contacto });
             }
 
-            // 21. ASESOR / ADMIN
+            // ASESOR / ADMIN
             else if (['.asesor', '.admin'].includes(texto)) {
                 await sock.sendMessage(remitente, {
                     text: `👨‍💻 *Click&Cut:* Un asesor te atenderá personalmente en un momento. Por favor déjanos escrito qué servicio, combo o trámite requieres o adjunta tu comprobante de pago.`
                 });
-            }
-
-            // 22. COMANDO ADMINISTRATIVO: CERRAR GRUPO
-            else if (texto === '.cerrar') {
-                if (!esGrupo) {
-                    await sock.sendMessage(remitente, { text: '⚠️ Este comando solo se puede usar dentro de un grupo.' });
-                    return;
-                }
-                try {
-                    await sock.groupSettingUpdate(remitente, 'announcement');
-                    const avisoCierre = `🔒 *GRUPO CERRADO* 🔒\n` +
-                                        `━━━━━━━━━━━━━━━━━━━━\n` +
-                                        `El grupo ha sido cerrado por administración. Los mensajes quedan pausados por el momento.\n\n` +
-                                        `✨ Para consultas urgentes o pedidos, escribe a un *.asesor* por mensaje privado. ¡Volvemos pronto! 💖`;
-                    await sock.sendMessage(remitente, { text: avisoCierre });
-                } catch (err) {
-                    await sock.sendMessage(remitente, { text: '⚠️ No pude cerrar el grupo. Asegúrate de que el bot sea administrador.' });
-                }
-            }
-
-            // 23. COMANDO ADMINISTRATIVO: ABRIR GRUPO
-            else if (texto === '.abrir') {
-                if (!esGrupo) {
-                    await sock.sendMessage(remitente, { text: '⚠️ Este comando solo se puede usar dentro de un grupo.' });
-                    return;
-                }
-                try {
-                    await sock.groupSettingUpdate(remitente, 'not_announcement');
-                    const avisoApertura = `🔓 *GRUPO ABIERTO* 🔓\n` +
-                                          `━━━━━━━━━━━━━━━━━━━━\n` +
-                                          `El chat ya se encuentra disponible para todos.\n\n` +
-                                          `🍿 Pueden enviar sus dudas, comprobantes o consultar precios con *.menu*. ¡Excelente día a tod@s! 🎉`;
-                    await sock.sendMessage(remitente, { text: avisoApertura });
-                } catch (err) {
-                    await sock.sendMessage(remitente, { text: '⚠️ No pude abrir el grupo. Asegúrate de que el bot sea administrador.' });
-                }
             }
 
         } catch (err) {
