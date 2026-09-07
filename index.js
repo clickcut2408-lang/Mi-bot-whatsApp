@@ -1,11 +1,24 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
+const fs = require('fs');
 
 const NUMERO_BOT = "528641141976";
+const NUMERO_ADMIN = "528641141976"; // Número autorizado para editar
 const PORT = process.env.PORT || 3000;
+const RUTA_DB = './comandos.json';
 
-// Servidor HTTP para mantener vivo el servicio en Render
+// Carga o inicialización de comandos personalizados
+let comandosPersonalizados = {};
+if (fs.existsSync(RUTA_DB)) {
+    try {
+        comandosPersonalizados = JSON.parse(fs.readFileSync(RUTA_DB, 'utf-8'));
+    } catch (e) {
+        comandosPersonalizados = {};
+    }
+}
+
+// Servidor HTTP para Render
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot Click&Cut en linea');
@@ -26,7 +39,7 @@ async function arrancarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Solicitud de código de vinculación si no hay sesión registrada
+    // Solicitud de código de vinculación
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
@@ -66,7 +79,7 @@ async function arrancarBot() {
         }
     });
 
-    // Bienvenida automática a nuevos participantes en grupos
+    // Bienvenida con mención y audio en grupos
     sock.ev.on('group-participants.update', async (update) => {
         try {
             const { id, participants, action } = update;
@@ -80,6 +93,16 @@ async function arrancarBot() {
                         text: mensajeBienvenida,
                         mentions: [participante]
                     });
+
+                    // Si existe bienvenida.mp3 lo manda como nota de voz
+                    if (fs.existsSync('./bienvenida.mp3')) {
+                        await delay(1000);
+                        await sock.sendMessage(id, {
+                            audio: { url: './bienvenida.mp3' },
+                            mimetype: 'audio/mp4',
+                            ptt: true
+                        });
+                    }
                 }
             }
         } catch (err) {
@@ -87,7 +110,7 @@ async function arrancarBot() {
         }
     });
 
-    // Procesamiento de mensajes y comandos
+    // Procesador de mensajes
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages ? chatUpdate.messages[0] : null;
@@ -96,6 +119,7 @@ async function arrancarBot() {
             const remitente = msg.key.remoteJid;
             const esGrupo = remitente.endsWith('@g.us');
             const esPropio = msg.key.fromMe;
+            const esAdminAutorizado = esPropio || remitente.includes(NUMERO_ADMIN);
 
             let cuerpo = msg.message;
             if (cuerpo.ephemeralMessage) cuerpo = cuerpo.ephemeralMessage.message;
@@ -114,14 +138,38 @@ async function arrancarBot() {
                 .normalize("NFD")
                 .replace(/[\u0300-\u036f]/g, "");
 
-            console.log(`[COMANDO] ${remitente} (fromMe: ${esPropio}): "${textoOriginal}"`);
+            console.log(`[COMANDO] ${remitente}: "${textoOriginal}"`);
 
             // ==========================================
-            // COMANDOS DE CONTROL DE GRUPO (PERMITEN fromMe Y PRIVADO)
+            // COMANDOS DE ADMINISTRACIÓN Y CONTROL
             // ==========================================
 
-            // 1. LISTAR GRUPOS PARA SABER CUÁL GESTIONAR
-            if (texto === '.grupos') {
+            // EDITAR COMANDOS DESDE WHATSAPP (Solo Admin)
+            if (textoOriginal.startsWith('.editar') && esAdminAutorizado) {
+                const resto = textoOriginal.slice(7).trim();
+                const primerEspacio = resto.indexOf(' ');
+
+                if (primerEspacio === -1) {
+                    await sock.sendMessage(remitente, {
+                        text: `⚠️ *Uso correcto:*\n*.editar nombre_comando nuevo contenido*\n\n*Ejemplo:*\n.editar pago Banco Spin CLABE 123456789...`
+                    });
+                    return;
+                }
+
+                const cmdNombre = resto.substring(0, primerEspacio).toLowerCase().replace(/^\./, '').trim();
+                const nuevoContenido = resto.substring(primerEspacio + 1).trim();
+
+                comandosPersonalizados[cmdNombre] = nuevoContenido;
+                fs.writeFileSync(RUTA_DB, JSON.stringify(comandosPersonalizados, null, 2));
+
+                await sock.sendMessage(remitente, {
+                    text: `✅ *¡Comando actualizado con éxito!*\n\nA partir de ahora, cuando alguien escriba *.${cmdNombre}*, el bot responderá con tu nuevo texto guardado.`
+                });
+                return;
+            }
+
+            // LISTAR GRUPOS
+            if (texto === '.grupos' && esAdminAutorizado) {
                 try {
                     const grupos = await sock.groupFetchAllParticipating();
                     let respuesta = `📋 *GRUPOS ACTIVOS DE CLICK&CUT*\n━━━━━━━━━━━━━━━━━━━━\n`;
@@ -136,21 +184,17 @@ async function arrancarBot() {
                 return;
             }
 
-            // 2. CERRAR GRUPO
-            if (texto.startsWith('.cerrar')) {
+            // CERRAR GRUPO
+            if (texto.startsWith('.cerrar') && esAdminAutorizado) {
                 const partes = textoOriginal.trim().split(/\s+/);
                 let targetJid = esGrupo ? remitente : partes[1];
 
                 if (!targetJid || !targetJid.endsWith('@g.us')) {
-                    // Si se envía por privado sin ID, intenta cerrar el primer grupo disponible
                     const grupos = await sock.groupFetchAllParticipating();
                     const ids = Object.keys(grupos);
-                    if (ids.length === 1) {
-                        targetJid = ids[0];
-                    } else {
-                        await sock.sendMessage(remitente, { 
-                            text: `⚠️ Si estás en privado, usa:\n*.cerrar ID_DEL_GRUPO*\n\nConsulta los IDs con *.grupos*` 
-                        });
+                    if (ids.length === 1) targetJid = ids[0];
+                    else {
+                        await sock.sendMessage(remitente, { text: `⚠️ Usa: *.cerrar ID_DEL_GRUPO* (consulta con *.grupos*)` });
                         return;
                     }
                 }
@@ -159,30 +203,24 @@ async function arrancarBot() {
                     await sock.groupSettingUpdate(targetJid, 'announcement');
                     const avisoCierre = `🔒 *GRUPO CERRADO* 🔒\n━━━━━━━━━━━━━━━━━━━━\nEl grupo ha sido cerrado por administración. Los mensajes quedan pausados por el momento.\n\n✨ Para consultas urgentes o pedidos, escribe a un *.asesor* por mensaje privado. ¡Volvemos pronto! 💖`;
                     await sock.sendMessage(targetJid, { text: avisoCierre });
-                    if (!esGrupo) {
-                        await sock.sendMessage(remitente, { text: `✅ Grupo cerrado con éxito.` });
-                    }
+                    if (!esGrupo) await sock.sendMessage(remitente, { text: `✅ Grupo cerrado con éxito.` });
                 } catch (err) {
                     await sock.sendMessage(remitente, { text: '⚠️ Error al cerrar el grupo. Verifica que el bot sea Administrador.' });
                 }
                 return;
             }
 
-            // 3. ABRIR GRUPO
-            if (texto.startsWith('.abrir')) {
+            // ABRIR GRUPO
+            if (texto.startsWith('.abrir') && esAdminAutorizado) {
                 const partes = textoOriginal.trim().split(/\s+/);
                 let targetJid = esGrupo ? remitente : partes[1];
 
                 if (!targetJid || !targetJid.endsWith('@g.us')) {
-                    // Si se envía por privado sin ID, intenta abrir el primer grupo disponible
                     const grupos = await sock.groupFetchAllParticipating();
                     const ids = Object.keys(grupos);
-                    if (ids.length === 1) {
-                        targetJid = ids[0];
-                    } else {
-                        await sock.sendMessage(remitente, { 
-                            text: `⚠️ Si estás en privado, usa:\n*.abrir ID_DEL_GRUPO*\n\nConsulta los IDs con *.grupos*` 
-                        });
+                    if (ids.length === 1) targetJid = ids[0];
+                    else {
+                        await sock.sendMessage(remitente, { text: `⚠️ Usa: *.abrir ID_DEL_GRUPO* (consulta con *.grupos*)` });
                         return;
                     }
                 }
@@ -191,23 +229,29 @@ async function arrancarBot() {
                     await sock.groupSettingUpdate(targetJid, 'not_announcement');
                     const avisoApertura = `🔓 *GRUPO ABIERTO* 🔓\n━━━━━━━━━━━━━━━━━━━━\nEl chat ya se encuentra disponible para todos.\n\n🍿 Pueden enviar sus dudas, comprobantes o consultar precios con *.menu*. ¡Excelente día a tod@s! 🎉`;
                     await sock.sendMessage(targetJid, { text: avisoApertura });
-                    if (!esGrupo) {
-                        await sock.sendMessage(remitente, { text: `✅ Grupo abierto con éxito.` });
-                    }
+                    if (!esGrupo) await sock.sendMessage(remitente, { text: `✅ Grupo abierto con éxito.` });
                 } catch (err) {
                     await sock.sendMessage(remitente, { text: '⚠️ Error al abrir el grupo. Verifica que el bot sea Administrador.' });
                 }
                 return;
             }
 
-            // Evitar que el bot responda al resto de sus propios mensajes para no hacer eco
+            // Evitar que el bot se responda a sí mismo en los menús generales
             if (esPropio) return;
 
             // ==========================================
-            // CATÁLOGOS Y ATENCIÓN A CLIENTES
+            // REVISIÓN DE COMANDOS EDITADOS
+            // ==========================================
+            const cmdSimple = texto.replace(/^\./, '');
+            if (comandosPersonalizados[cmdSimple]) {
+                await sock.sendMessage(remitente, { text: comandosPersonalizados[cmdSimple] });
+                return;
+            }
+
+            // ==========================================
+            // COMANDOS POR DEFECTO
             // ==========================================
 
-            // MENÚ PRINCIPAL
             if (['.menu', '.ayuda'].includes(texto)) {
                 const menu = `🛒 *BIENVENIDO A CLICK&CUT* 🛒\n\n` +
                              `Consulta la información con los siguientes comandos:\n\n` +
@@ -234,7 +278,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: menu });
             }
 
-            // COMBOS Y DÚOS
             else if (['.combos', '.duos', '.promos'].includes(texto)) {
                 const combos = `🎀✨ *COMBOS CLICK&CUT* ✨🎀\n` +
                                `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -276,7 +319,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: combos });
             }
 
-            // STREAMING
             else if (['.streaming'].includes(texto)) {
                 const streaming = `📺 *STREAMING & SERIES* 📺\n` +
                                   `━━━━━━━━━━━━━━━━━━\n` +
@@ -314,7 +356,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: streaming });
             }
 
-            // MÚSICA
             else if (['.musica'].includes(texto)) {
                 const musica = `🎶 *MÚSICA Y AUDIO* 🎶\n` +
                                `━━━━━━━━━━━━━━━━━━\n` +
@@ -332,7 +373,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: musica });
             }
 
-            // APLICACIONES Y HERRAMIENTAS
             else if (['.apps'].includes(texto)) {
                 const apps = `🛠️ *HERRAMIENTAS, APPS & JUEGOS* 🛠️\n` +
                              `━━━━━━━━━━━━━━━━━━\n` +
@@ -357,7 +397,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: apps });
             }
 
-            // TRÁMITES Y SERVICIOS
             else if (['.tramites', '.servicios'].includes(texto)) {
                 const tramites = `✧˚｡⋆ *CLICK&CUT TRÁMITES Y SERVICIOS* ✧˚｡⋆\n` +
                                  `━━━━━━━━━━━━━━━━━━\n` +
@@ -417,7 +456,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: tramites });
             }
 
-            // DOCUMENTOS MÉDICOS Y EXTRAS
             else if (['.extras', '.medicos'].includes(texto)) {
                 const extras = `💗🩺 *DOCUMENTOS MÉDICOS & PERSONALES* 🩺💗\n` +
                                `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -443,7 +481,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: extras });
             }
 
-            // TIEMPO AIRE / RECARGAS
             else if (['.recargas', '.tiempoaire'].includes(texto)) {
                 const recargas = `✨ *CLICK&CUT | RECARGAS AL MEJOR PRECIO* ✨\n` +
                                  `Más megas, más saldo, más ahorro. Rápido, seguro y confiable.\n` +
@@ -472,7 +509,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: recargas });
             }
 
-            // DIAMANTES FREE FIRE
             else if (['.setdiamantes', '.diamantes', '.freefire'].includes(texto)) {
                 const diamantes = `💎 *DIAMANTES CLICK&CUT* 💎\n` +
                                   `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -495,7 +531,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: diamantes });
             }
 
-            // MEGA PACK LIBROS / PDF
             else if (['.libros', '.pdf', '.megapack', '.pack'].includes(texto)) {
                 const libros = `🔥 *¡MEGA PACK DE 1000 ARCHIVOS EN PDF!* 🔥\n` +
                                `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -513,7 +548,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: libros });
             }
 
-            // REDES SOCIALES
             else if (['.redes', '.seguidores'].includes(texto)) {
                 const redes = `🚀✨ *SEGUIDORES & CRECIMIENTO EN REDES SOCIALES* ✨🚀\n` +
                               `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -561,7 +595,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: redes });
             }
 
-            // NÚMEROS VIRTUALES
             else if (['.numeros', '.virtuales'].includes(texto)) {
                 const virtuales = `📱✨ *NÚMEROS VIRTUALES CLICK&CUT* ✨📱\n` +
                                   `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -573,7 +606,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: virtuales });
             }
 
-            // CATÁLOGO COMPLETO
             else if (['.catalogo'].includes(texto)) {
                 const stockCompleto = `🩷 *APPSTOCK CLICK&CUT* 🩷\n` +
                                       `━━━━━━━━━━━━━━━━━━\n` +
@@ -616,7 +648,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: stockCompleto });
             }
 
-            // CONTENIDO +18
             else if (['.adultos'].includes(texto)) {
                 const adultos = `🔞 *CONTENIDO +18 (Solo Mayores)* 🔞\n` +
                                 `━━━━━━━━━━━━━━━━━━\n` +
@@ -628,7 +659,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: adultos });
             }
 
-            // DATOS DE PAGO
             else if (['.pago'].includes(texto)) {
                 const pago = `🌸🪞 *TRANSFERENCIAS Y DEPÓSITOS* 🪞🌸\n\n` +
                              `🏦 *Banco:* Spin by Oxxo o STP\n` +
@@ -641,7 +671,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: pago });
             }
 
-            // GARANTÍA
             else if (['.garantia'].includes(texto)) {
                 const garantia = `🛡️ *COBERTURA DE GARANTÍAS CLICK&CUT* 🛡️\n` +
                                  `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -658,7 +687,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: garantia });
             }
 
-            // PREGUNTAS FRECUENTES (FAQ / DUDAS)
             else if (['.dudas', '.faq'].includes(texto)) {
                 const dudas = `❓ *PREGUNTAS FRECUENTES Y DUDAS COMUNES* ❓\n` +
                               `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -681,7 +709,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: dudas });
             }
 
-            // REGLAS
             else if (['.reglas'].includes(texto)) {
                 const reglas = `✂️✨ *¡BIENVENID@ A CLICK&CUT STREAMING!* ✨✂️\n` +
                                `¡Gracias por confiar en nosotros! 💜 Lee estas breves reglas para cuidar tu servicio y mantener tu garantía activa:\n` +
@@ -713,7 +740,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: reglas });
             }
 
-            // HORARIO
             else if (['.horario', '.atencion'].includes(texto)) {
                 const horario = `⏰ *HORARIO DE ATENCIÓN & ENTREGAS* ⏰\n` +
                                 `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -723,7 +749,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: horario });
             }
 
-            // CONTACTO
             else if (['.contacto'].includes(texto)) {
                 const contacto = `📱✨ *CANALES Y CONTACTO CLICK&CUT* ✨📱\n` +
                                  `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -734,7 +759,6 @@ async function arrancarBot() {
                 await sock.sendMessage(remitente, { text: contacto });
             }
 
-            // ASESOR / ADMIN
             else if (['.asesor', '.admin'].includes(texto)) {
                 await sock.sendMessage(remitente, {
                     text: `👨‍💻 *Click&Cut:* Un asesor te atenderá personalmente en un momento. Por favor déjanos escrito qué servicio, combo o trámite requieres o adjunta tu comprobante de pago.`
