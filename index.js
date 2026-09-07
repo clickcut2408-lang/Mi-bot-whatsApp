@@ -1,8 +1,10 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+: const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
 
-// Servidor requerido por Render
+// COLOCA AQUÍ TU NÚMERO (código de país + tus 10 dígitos)
+const NUMERO_BOT = "5218641141976"; 
+
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -21,6 +23,19 @@ async function iniciarBot() {
     });
 
     sock.ev.on('creds.update', saveCreds);
+
+    if (!sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode(NUMERO_BOT);
+                console.log(`\n=========================================`);
+                console.log(`TU CODIGO DE VINCULACION ES: ${code}`);
+                console.log(`=========================================\n`);
+            } catch (err) {
+                console.log('Error generando código:', err);
+            }
+        }, 4000);
+    }
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
@@ -73,7 +88,7 @@ async function iniciarBot() {
                               `💛 *VIX (Perfil):*\n1M $9 | 2M $15 | 3M $19 | 12M $28\n` +
                               `💛 *VIX (Completa):*\n1M $13 | 2M $20 | 3M $29 | 12M $38\n` +
                               `━━━━━━━━━━━━━━━━━━\n` +
-                              `⭐ *Paramount+ (Perfil):*\n1M $13 | 2M $18 | 3M $23 | 12M $30\n` +
+                              `⭐ *Paramount+:*\n1M $13 | 2M $18 | 3M $23 | 12M $30\n` +
                               `⭐ *Paramount+ (Completa):*\n1M $45 | 2M $55 | 3M $65 | 12M $110\n` +
                               `━━━━━━━━━━━━━━━━━━\n` +
                               `🍿 *Crunchyroll (Perfil):*\n1M $17 | 2M $24 | 3M $32 | 12M $48\n` +
@@ -228,4 +243,3 @@ async function iniciarBot() {
 }
 
 iniciarBot();
-        
