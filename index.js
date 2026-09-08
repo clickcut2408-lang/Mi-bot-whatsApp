@@ -3,8 +3,8 @@ const pino = require('pino');
 const http = require('http');
 const fs = require('fs');
 
-const NUMERO_BOT = "528641141976";
-const NUMERO_ADMIN = "528641141976"; // Número autorizado para comandos admin y edición
+const NUMERO_BOT = "528641114515";
+const NUMERO_ADMIN = "8641114514"; // Número autorizado para comandos admin y edición
 const PORT = process.env.PORT || 3000;
 const RUTA_DB = './comandos.json';
 
