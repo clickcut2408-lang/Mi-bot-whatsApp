@@ -9,8 +9,9 @@ const NUMERO_BOT = "528641114514";
 const NUMERO_ADMIN = "5218641114514"; // Número autorizado para crear o editar comandos
 const PORT = process.env.PORT || 3000;
 
-// Inicializar API de Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Inicializar API de Gemini con validación segura
+const apiKey = process.env.GEMINI_API_KEY || '';
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 // System Prompt del Personaje Click & Cut
 const SYSTEM_INSTRUCTION = `
@@ -162,9 +163,14 @@ async function arrancarBot() {
                                   cuerpo.imageMessage?.caption ||
                                   '';
 
-            if (!textoOriginal || esPropio) return;
+            if (!textoOriginal) return;
 
-            const esComando = textoOriginal.startsWith('.');
+            // REGLA PARA RESPONDERTE A TI MISMO:
+            // Si el mensaje fue enviado desde tu propio número, solo se procesa si empieza con '.'
+            // Esto evita que las respuestas automáticas del bot formen bucles infinitos.
+            if (esPropio && !textoOriginal.trim().startsWith('.')) return;
+
+            const esComando = textoOriginal.trim().startsWith('.');
             const texto = textoOriginal
                 .toLowerCase()
                 .trim()
@@ -177,7 +183,7 @@ async function arrancarBot() {
             // SECCIÓN 1: PROCESAR COMANDOS TRADICIONALES
             // ==========================================
             if (esComando) {
-                const esAdministrador = remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT;
+                const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT;
 
                 // COMANDO .SET (ADMIN)
                 if (texto.startsWith('.set')) {
@@ -884,11 +890,18 @@ async function arrancarBot() {
             // ==========================================
             // SECCIÓN 2: PERSONAJE CON INTELIGENCIA ARTIFICIAL
             // ==========================================
-            // En chats privados responde siempre. En grupos, solo si mencionan al bot o su número.
+            // No procesar con IA si el mensaje lo enviaste tú misma
+            if (esPropio) return;
+
             const mencionado = textoOriginal.includes(`@${NUMERO_BOT}`) || textoOriginal.includes(`@5218641114514`);
             const debeResponderIA = !esGrupo || (esGrupo && mencionado);
 
             if (debeResponderIA) {
+                if (!ai) {
+                    console.warn('[AVISO GEMINI] Falta configurar GEMINI_API_KEY en las variables de entorno.');
+                    return;
+                }
+
                 try {
                     const response = await ai.models.generateContent({
                         model: 'gemini-2.5-flash',
