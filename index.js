@@ -117,7 +117,7 @@ async function arrancarBot() {
             console.log(`[COMANDO] ${remitente} (fromMe: ${esPropio}): "${textoOriginal}"`);
 
             // ==========================================
-            // COMANDOS DE CONTROL DE GRUPO (PERMITEN fromMe Y PRIVADO)
+            // COMANDOS DE CONTROL DE GRUPO
             // ==========================================
 
             // 1. LISTAR GRUPOS PARA SABER CUÁL GESTIONAR
@@ -142,7 +142,6 @@ async function arrancarBot() {
                 let targetJid = esGrupo ? remitente : partes[1];
 
                 if (!targetJid || !targetJid.endsWith('@g.us')) {
-                    // Si se envía por privado sin ID, intenta cerrar el primer grupo disponible
                     const grupos = await sock.groupFetchAllParticipating();
                     const ids = Object.keys(grupos);
                     if (ids.length === 1) {
@@ -174,7 +173,6 @@ async function arrancarBot() {
                 let targetJid = esGrupo ? remitente : partes[1];
 
                 if (!targetJid || !targetJid.endsWith('@g.us')) {
-                    // Si se envía por privado sin ID, intenta abrir el primer grupo disponible
                     const grupos = await sock.groupFetchAllParticipating();
                     const ids = Object.keys(grupos);
                     if (ids.length === 1) {
@@ -199,9 +197,6 @@ async function arrancarBot() {
                 }
                 return;
             }
-
-            // Evitar que el bot responda al resto de sus propios mensajes para no hacer eco
-            if (esPropio) return;
 
             // ==========================================
             // CATÁLOGOS Y ATENCIÓN A CLIENTES
