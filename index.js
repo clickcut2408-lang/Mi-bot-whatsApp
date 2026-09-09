@@ -1,9 +1,39 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 const NUMERO_BOT = "528641114514";
+const NUMERO_ADMIN = "5218641114514"; // Número autorizado para crear o editar comandos
 const PORT = process.env.PORT || 3000;
+
+// Archivo JSON para persistir comandos dinámicos creados con .set
+const ARCHIVO_COMANDOS = path.join(__dirname, 'comandos_personalizados.json');
+
+function cargarComandosDinamicos() {
+    try {
+        if (!fs.existsSync(ARCHIVO_COMANDOS)) {
+            fs.writeFileSync(ARCHIVO_COMANDOS, JSON.stringify({}, null, 2));
+            return {};
+        }
+        const data = fs.readFileSync(ARCHIVO_COMANDOS, 'utf-8');
+        return JSON.parse(data);
+    } catch (e) {
+        console.log('[ERROR ARCHIVO COMANDOS]', e.message);
+        return {};
+    }
+}
+
+function guardarComandosDinamicos(comandos) {
+    try {
+        fs.writeFileSync(ARCHIVO_COMANDOS, JSON.stringify(comandos, null, 2));
+    } catch (e) {
+        console.log('[ERROR GUARDANDO COMANDOS]', e.message);
+    }
+}
+
+let comandosPersonalizados = cargarComandosDinamicos();
 
 // Servidor HTTP para mantener vivo el servicio en Render
 http.createServer((req, res) => {
@@ -96,6 +126,7 @@ async function arrancarBot() {
             const remitente = msg.key.remoteJid;
             const esGrupo = remitente.endsWith('@g.us');
             const esPropio = msg.key.fromMe;
+            const remitenteNumero = (msg.key.participant || remitente).split('@')[0].replace(/[^0-9]/g, '');
 
             let cuerpo = msg.message;
             if (cuerpo.ephemeralMessage) cuerpo = cuerpo.ephemeralMessage.message;
@@ -115,6 +146,75 @@ async function arrancarBot() {
                 .replace(/[\u0300-\u036f]/g, "");
 
             console.log(`[COMANDO] ${remitente} (fromMe: ${esPropio}): "${textoOriginal}"`);
+
+            const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT;
+
+            // ==========================================
+            // COMANDO DINÁMICO .SET (EXCLUSIVO ADMINISTRADOR)
+            // ==========================================
+            // Formato de uso: .set nombre_del_comando | Respuesta que dará el bot
+            if (texto.startsWith('.set')) {
+                if (!esAdministrador) {
+                    await sock.sendMessage(remitente, { text: '⛔ Este comando solo puede ser ejecutado por el administrador.' });
+                    return;
+                }
+
+                const contenido = textoOriginal.slice(4).trim();
+                const partes = contenido.split('|');
+
+                if (partes.length < 2) {
+                    const ayudaSet = `⚙️ *CONFIGURADOR DE COMANDOS CLICK&CUT*\n━━━━━━━━━━━━━━━━━━━━\n` +
+                                     `Uso correcto:\n` +
+                                     `*.set nombre_comando | Mensaje de respuesta*\n\n` +
+                                     `*Ejemplo:*\n` +
+                                     `*.set .aviso | Mañana cerramos a las 6:00 PM*\n\n` +
+                                     `📌 Para eliminar uno usa:\n` +
+                                     `*.delset .nombre_comando*`;
+                    await sock.sendMessage(remitente, { text: ayudaSet });
+                    return;
+                }
+
+                let nombreCmd = partes[0].trim().toLowerCase();
+                if (!nombreCmd.startsWith('.')) nombreCmd = '.' + nombreCmd;
+                const respuestaCmd = partes.slice(1).join('|').trim();
+
+                comandosPersonalizados[nombreCmd] = respuestaCmd;
+                guardarComandosDinamicos(comandosPersonalizados);
+
+                await sock.sendMessage(remitente, { 
+                    text: `✅ *Comando configurado exitosamente*\n━━━━━━━━━━━━━━━━━━━━\n🔹 *Comando:* \`${nombreCmd}\`\n💬 *Respuesta:* \n${respuestaCmd}` 
+                });
+                return;
+            }
+
+            // Eliminar comandos dinámicos
+            if (texto.startsWith('.delset')) {
+                if (!esAdministrador) {
+                    await sock.sendMessage(remitente, { text: '⛔ Este comando solo puede ser ejecutado por el administrador.' });
+                    return;
+                }
+
+                let nombreCmd = textoOriginal.slice(7).trim().toLowerCase();
+                if (!nombreCmd.startsWith('.')) nombreCmd = '.' + nombreCmd;
+
+                if (comandosPersonalizados[nombreCmd]) {
+                    delete comandosPersonalizados[nombreCmd];
+                    guardarComandosDinamicos(comandosPersonalizados);
+                    await sock.sendMessage(remitente, { text: `🗑️ El comando \`${nombreCmd}\` ha sido eliminado.` });
+                } else {
+                    await sock.sendMessage(remitente, { text: `⚠️ No se encontró el comando dinámico \`${nombreCmd}\`.` });
+                }
+                return;
+            }
+
+            // ==========================================
+            // VERIFICACIÓN DE COMANDOS PERSONALIZADOS (.SET)
+            // ==========================================
+            const comandoBuscado = texto.split(/\s+/)[0];
+            if (comandosPersonalizados[comandoBuscado]) {
+                await sock.sendMessage(remitente, { text: comandosPersonalizados[comandoBuscado] });
+                return;
+            }
 
             // ==========================================
             // COMANDOS DE CONTROL DE GRUPO
@@ -204,28 +304,38 @@ async function arrancarBot() {
 
             // MENÚ PRINCIPAL
             if (['.menu', '.ayuda'].includes(texto)) {
-                const menu = `🛒 *BIENVENIDO A CLICK&CUT* 🛒\n\n` +
-                             `Consulta la información con los siguientes comandos:\n\n` +
-                             `🎀 *.combos* - Combos especiales y Dúos Tiernos\n` +
-                             `📺 *.streaming* - Cuentas y pantallas de series/películas\n` +
-                             `🎶 *.musica* - Spotify, YouTube Premium y Deezer\n` +
-                             `🛠️ *.apps* - Canva Pro, ChatGPT, Gemini y Office\n` +
-                             `📄 *.tramites* - Actas, licencias, Infonavit, RFC y SAT\n` +
-                             `🩺 *.extras* - Documentos médicos y personales\n` +
-                             `📲 *.recargas* - Tiempo aire con descuento (Telcel, Bait, etc.)\n` +
-                             `💎 *.diamantes* - Recargas Free Fire y Booyah\n` +
-                             `📚 *.libros* - Mega Pack 1000 PDFs + Regalo Mundial\n` +
-                             `🚀 *.redes* - Seguidores, likes y vistas en redes sociales\n` +
-                             `📱 *.numeros* - Números virtuales para WhatsApp y apps\n` +
-                             `📋 *.catalogo* - Lista completa de streaming y herramientas\n` +
-                             `🔞 *.adultos* - Catálogo exclusivo +18\n` +
-                             `💳 *.pago* - Métodos de transferencia y depósitos\n` +
-                             `🛡️ *.garantia* - Cobertura y respaldo de tu compra\n` +
-                             `❓ *.dudas* - Preguntas frecuentes (FAQ)\n` +
-                             `⏰ *.horario* - Horarios de atención y entregas\n` +
-                             `📜 *.reglas* - Reglas de uso y condiciones\n` +
-                             `📞 *.contacto* - Canales oficiales de contacto\n` +
-                             `👨‍💻 *.asesor* - Contactar a un asesor humano`;
+                const menu = `🛒 *BIENVENIDO A CLICK&CUT* 🛒\n` +
+                             `━━━━━━━━━━━━━━━━━━━━\n` +
+                             `_Escribe el comando que necesites:_\n\n` +
+
+                             `🍿 *ENTRETENIMIENTO*\n` +
+                             `🎀 *.combos* ➜ Combos y Dúos Tiernos\n\n` +
+                             `📺 *.streaming* ➜ Cuentas y pantallas\n\n` +
+                             `🎶 *.musica* ➜ Spotify, YouTube y Deezer\n\n` +
+                             `🛠️ *.apps* ➜ Canva Pro, IA y Office\n\n` +
+
+                             `📋 *SERVICIOS Y GESTIÓN*\n` +
+                             `📄 *.tramites* ➜ Actas, licencias y SAT\n\n` +
+                             `🩺 *.extras* ➜ Documentos médicos y recetas\n\n` +
+                             `📲 *.recargas* ➜ Saldo con descuento\n\n` +
+                             `📱 *.numeros* ➜ Números virtuales\n\n` +
+
+                             `🎮 *JUEGOS Y DIGITAL*\n` +
+                             `💎 *.diamantes* ➜ Free Fire y Booyah\n\n` +
+                             `📚 *.libros* ➜ Mega Pack 1000 PDFs\n\n` +
+                             `🚀 *.redes* ➜ Seguidores, likes y vistas\n\n` +
+                             `🔞 *.adultos* ➜ Contenido +18 exclusivo\n\n` +
+
+                             `ℹ️ *INFORMACIÓN*\n` +
+                             `📋 *.catalogo* ➜ Lista completa\n\n` +
+                             `💳 *.pago* ➜ Datos de transferencia\n\n` +
+                             `🛡️ *.garantia* ➜ Cobertura de compra\n\n` +
+                             `❓ *.dudas* ➜ Preguntas frecuentes\n\n` +
+                             `⏰ *.horario* ➜ Horarios de entrega\n\n` +
+                             `📜 *.reglas* ➜ Condiciones de uso\n\n` +
+                             `📞 *.contacto* ➜ Canales oficiales\n\n` +
+                             `👨‍💻 *.asesor* ➜ Atención humana\n` +
+                             `━━━━━━━━━━━━━━━━━━━━`;
                 await sock.sendMessage(remitente, { text: menu });
             }
 
