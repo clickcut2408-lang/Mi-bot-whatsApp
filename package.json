@@ -1,17 +1,14 @@
 {
-  "name": "bot-whatsapp-clickcut",
+  "name": "mi-bot-whatsapp",
   "version": "1.0.0",
-  "description": "Bot de WhatsApp para Click&Cut con Node.js y Baileys",
+  "description": "Bot de WhatsApp con personaje para Click & Cut",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.13",
-    "express": "^4.19.2",
-    "pino": "^9.0.0"
-  },
-  "engines": {
-    "node": ">=18.x"
+    "@google/genai": "^0.1.2",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.0"
   }
 }
