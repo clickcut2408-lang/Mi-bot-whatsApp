@@ -1,29 +1,31 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, delay, proto, initAuthCreds, BufferJSON } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 const { GoogleGenAI } = require('@google/genai');
 
 const NUMERO_BOT = "525644695396";
 const NUMERO_BOT_ALT = "5215644695396";
 const NUMERO_ADMIN = "5218641114514";
 const PORT = process.env.PORT || 3000;
+const MONGO_URI = process.env.MONGO_URI;
 
-// Inicializar API de Gemini con validación segura
+// Inicializar API de Gemini
 const apiKey = process.env.GEMINI_API_KEY || '';
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// System Prompt del Personaje Click & Cut
+// System Instruction Click & Cut
 const SYSTEM_INSTRUCTION = `
 Eres la asistente virtual y anfitriona oficial de "Click & Cut".
 Representas a la chica de la marca: dulce, tierna, educada, súper atenta, paciente y muy servicial.
 Hablas siempre en femenino ("encantada de ayudarte", "lista para atenderte").
 
 Servicios principales que ofreces con calidez:
-1. Streaming Digital: Cuentas y perfiles (Netflix, Disney+, Max, Prime, Vix, Paramount, Spotify, YouTube). Renovaciones, activaciones rápidas y seguras.
-2. Trámites y servicios digitales: Actas de nacimiento/matrimonio/defunción, CURP certificada, RFC/SAT, citas, constancias IMSS/ISSSTE, antecedentes, licencias, formatos y pagos por internet.
-3. Papelería creativa y diseño: Stickers personalizados, etiquetas escolares, recuerdos, proyectos y detalles hechos a mano con amor.
+1. Streaming Digital: Cuentas y perfiles (Netflix, Disney+, Max, Prime, Vix, Paramount, Spotify, YouTube, Apple Music, Tidal, Amazon Music). Renovaciones y activaciones.
+2. Trámites y servicios digitales: Actas de registro civil, CURP certificada, RFC/SAT, citas, constancias IMSS/ISSSTE, antecedentes, licencias y formatos.
+3. Papelería creativa, diseño y recursos: Stickers personalizados, etiquetas escolares, 42 plantillas Canva, libros para colorear, mangas y proyectos digitales.
 4. Servicios adicionales: Recargas con descuento (Telcel, Bait, Movistar, AT&T), diamantes Free Fire, seguidores en redes sociales y números virtuales.
 
 Pautas de respuesta:
@@ -34,6 +36,85 @@ Pautas de respuesta:
 - Si un cliente tiene dudas de cuentas caídas o reportes, pídele con dulzura su comprobante o captura de pantalla e indícale que escriba *.asesor* para que el equipo humano lo resuelva de inmediato.
 `;
 
+// ==========================================
+// ADAPTADOR DE AUTENTICACIÓN PARA MONGODB
+// ==========================================
+const AuthSchema = new mongoose.Schema({
+    _id: String,
+    data: String
+});
+const AuthModel = mongoose.models.WhatsAppAuth || mongoose.model('WhatsAppAuth', AuthSchema);
+
+async function useMongoDBAuthState(collectionPrefix = 'auth_session') {
+    const writeData = async (data, id) => {
+        try {
+            const key = `${collectionPrefix}_${id}`;
+            const str = JSON.stringify(data, BufferJSON.replacer);
+            await AuthModel.findByIdAndUpdate(key, { data: str }, { upsert: true });
+        } catch (e) {
+            console.error('[ERROR MONGODB WRITE]', e.message);
+        }
+    };
+
+    const readData = async (id) => {
+        try {
+            const key = `${collectionPrefix}_${id}`;
+            const doc = await AuthModel.findById(key);
+            if (!doc || !doc.data) return null;
+            return JSON.parse(doc.data, BufferJSON.reviver);
+        } catch (e) {
+            return null;
+        }
+    };
+
+    const removeData = async (id) => {
+        try {
+            const key = `${collectionPrefix}_${id}`;
+            await AuthModel.findByIdAndDelete(key);
+        } catch (e) {
+            console.error('[ERROR MONGODB DELETE]', e.message);
+        }
+    };
+
+    const creds = (await readData('creds')) || initAuthCreds();
+
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    for (const id of ids) {
+                        let value = await readData(`${type}-${id}`);
+                        if (type === 'app-state-sync-key' && value) {
+                            value = proto.Message.AppStateSyncKeyData.fromObject(value);
+                        }
+                        data[id] = value;
+                    }
+                    return data;
+                },
+                set: async (data) => {
+                    for (const category in data) {
+                        for (const id in data[category]) {
+                            const value = data[category][id];
+                            const key = `${category}-${id}`;
+                            if (value) {
+                                await writeData(value, key);
+                            } else {
+                                await removeData(key);
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        saveCreds: () => writeData(creds, 'creds')
+    };
+}
+
+// ==========================================
+// COMANDOS DINÁMICOS LOCALES
+// ==========================================
 const ARCHIVO_COMANDOS = path.join(__dirname, 'comandos_personalizados.json');
 
 function cargarComandosDinamicos() {
@@ -45,7 +126,6 @@ function cargarComandosDinamicos() {
         const data = fs.readFileSync(ARCHIVO_COMANDOS, 'utf-8');
         return JSON.parse(data);
     } catch (e) {
-        console.log('[ERROR ARCHIVO COMANDOS]', e.message);
         return {};
     }
 }
@@ -53,14 +133,12 @@ function cargarComandosDinamicos() {
 function guardarComandosDinamicos(comandos) {
     try {
         fs.writeFileSync(ARCHIVO_COMANDOS, JSON.stringify(comandos, null, 2));
-    } catch (e) {
-        console.log('[ERROR GUARDANDO COMANDOS]', e.message);
-    }
+    } catch (e) {}
 }
 
 let comandosPersonalizados = cargarComandosDinamicos();
 
-// Servidor HTTP para mantener vivo el contenedor en Render
+// Servidor HTTP para Render
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot Click&Cut en linea');
@@ -68,8 +146,25 @@ http.createServer((req, res) => {
     console.log(`[HTTP] Servidor escuchando en el puerto ${PORT}`);
 });
 
+// ==========================================
+// FUNCIÓN PRINCIPAL DE ARRANQUE
+// ==========================================
 async function arrancarBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('sesion_auth');
+    if (!MONGO_URI) {
+        console.error('❌ ERROR: Falta configurar la variable MONGO_URI en el panel de Render.');
+        return;
+    }
+
+    try {
+        await mongoose.connect(MONGO_URI);
+        console.log('✅ [BD] Conexión establecida con MongoDB Atlas');
+    } catch (dbErr) {
+        console.error('❌ [ERROR MONGODB CONEXION]', dbErr.message);
+        await delay(5000);
+        return arrancarBot();
+    }
+
+    const { state, saveCreds } = await useMongoDBAuthState();
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
@@ -171,7 +266,6 @@ async function arrancarBot() {
 
             if (!textoOriginal) return;
 
-            // Permite responderte a ti misma únicamente si envías un comando con '.'
             if (esPropio && !textoOriginal.trim().startsWith('.')) return;
 
             const esComando = textoOriginal.trim().startsWith('.');
@@ -183,13 +277,9 @@ async function arrancarBot() {
 
             console.log(`[MENSAJE] ${remitente}: "${textoOriginal}"`);
 
-            // ==========================================
-            // SECCIÓN 1: PROCESAR COMANDOS TRADICIONALES
-            // ==========================================
             if (esComando) {
                 const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT || remitenteNumero === NUMERO_BOT_ALT;
 
-                // COMANDO .SET (ADMIN)
                 if (texto.startsWith('.set')) {
                     if (!esAdministrador) {
                         await sock.sendMessage(remitente, { text: '> ⛔ *Este comando solo puede ser ejecutado por el administrador.*' });
@@ -229,7 +319,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // COMANDO .DELSET (ADMIN)
                 if (texto.startsWith('.delset')) {
                     if (!esAdministrador) {
                         await sock.sendMessage(remitente, { text: '> ⛔ *Este comando solo puede ser ejecutado por el administrador.*' });
@@ -249,14 +338,12 @@ async function arrancarBot() {
                     return;
                 }
 
-                // COMANDOS DINÁMICOS GUARDADOS
                 const comandoBuscado = texto.split(/\s+/)[0];
                 if (comandosPersonalizados[comandoBuscado]) {
                     await sock.sendMessage(remitente, { text: comandosPersonalizados[comandoBuscado] });
                     return;
                 }
 
-                // CONTROL DE GRUPO: .GRUPOS
                 if (texto === '.grupos') {
                     try {
                         const grupos = await sock.groupFetchAllParticipating();
@@ -272,7 +359,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // CONTROL DE GRUPO: .CERRAR
                 if (texto.startsWith('.cerrar')) {
                     const partes = textoOriginal.trim().split(/\s+/);
                     let targetJid = esGrupo ? remitente : partes[1];
@@ -316,7 +402,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // CONTROL DE GRUPO: .ABRIR
                 if (texto.startsWith('.abrir')) {
                     const partes = textoOriginal.trim().split(/\s+/);
                     let targetJid = esGrupo ? remitente : partes[1];
@@ -360,7 +445,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // MENÚ PRINCIPAL
                 if (['.menu', '.ayuda'].includes(texto)) {
                     const menu = 
 `╭─── 🛒 *CLICK & CUT TIENDA* 🛒 ───╮
@@ -370,30 +454,32 @@ async function arrancarBot() {
 > 💡 _Escribe cualquiera de los siguientes comandos:_
 
 ┌─ 🍿 *ENTRETENIMIENTO*
+│ • \`.catalogo\` ➜ Resumen rápido de stock general
 │ • \`.combos\` ➜ Combos y Dúos Tiernos
 │ • \`.streaming\` ➜ Cuentas completas y pantallas
-│ • \`.musica\` ➜ Spotify, YouTube y Deezer
-│ • \`.apps\` ➜ Canva Pro, IA y Office
+│ • \`.musica\` ➜ Spotify, YouTube, Apple Music y más
+│ • \`.apps\` ➜ Canva Pro, IA, CapCut y Office
 └─────────────────────────────
 
 ┌─ 📋 *GESTIÓN Y TRÁMITES*
 │ • \`.tramites\` ➜ Actas, licencias, SAT y más
-│ • \`.extras\` ➜ Documentos y notas médicas
+│ • \`.medicos\` ➜ Recetas, notas e incapacidades
 │ • \`.recargas\` ➜ Saldo con precio especial
 │ • \`.numeros\` ➜ Números virtuales activos
 └─────────────────────────────
 
-┌─ 🎮 *DIGITAL Y SOCIAL*
-│ • \`.diamantes\` ➜ Free Fire y Booyah
+┌─ 📁 *EXTRAS & DIGITAL*
+│ • \`.extras\` ➜ Mangas, películas, APKs y Canva
 │ • \`.libros\` ➜ Mega Pack 1000 PDFs
+│ • \`.diamantes\` ➜ Free Fire y Pase Booyah
 │ • \`.redes\` ➜ Seguidores, likes y vistas
 │ • \`.adultos\` ➜ Contenido +18 exclusivo
 └─────────────────────────────
 
-┌─ ℹ️ *INFORMACIÓN Y PAGO*
-│ • \`.catalogo\` ➜ Lista compacta de stock
+┌─ ℹ️ *INFORMACIÓN Y ATENCIÓN*
 │ • \`.pago\` ➜ Datos bancarios / transferencias
-│ • \`.garantia\` ➜ Cobertura y tiempos de reposición
+│ • \`.contacto\` ➜ Canales oficiales y redes
+│ • \`.garantia\` ➜ Cobertura y reposiciones
 │ • \`.dudas\` ➜ Preguntas frecuentes
 │ • \`.horario\` ➜ Horarios de entrega
 │ • \`.reglas\` ➜ Condiciones de uso
@@ -405,7 +491,296 @@ async function arrancarBot() {
                     return;
                 }
 
-                // COMBOS
+                if (texto === '.catalogo') {
+                    const stockCompleto = 
+`╭─── 🩷 *CATÁLOGO GENERAL CLICK&CUT* 🩷 ───╮
+│      *RESUMEN RÁPIDO DE TODOS LOS SERVICIOS*
+╰──────────────────────────────────────────╯
+
+┌─ 🎬 *STREAMING (PERFIL / COMPLETA)*
+│ • Netflix: TV \`1M $29\` | Normal \`1M $49\` | Full \`$215\`
+│ • Disney+: Perfil \`1M $15\` | Full \`1M $56\`
+│ • Max: Perfil \`1M $15\` | Full \`1M $45\`
+│ • Prime Video: Perfil \`1M $10\` | Full \`1M $28\`
+│ • Vix: Perfil \`1M $9\` | Full \`1M $13\`
+│ • Paramount+: Perfil \`1M $13\` | Full \`1M $45\`
+│ • Crunchyroll: Perfil \`1M $17\` | Full \`1M $45\`
+│ • Apple TV: Perfil \`1M $19\` | IPTV: \`1M $17\`
+└──────────────────────────────────────────
+
+┌─ 🎶 *MÚSICA & APPS*
+│ • Spotify: \`1M $37\` | Anual \`$135\`
+│ • YouTube: Invitación \`1M $15\` | Personal \`$22\`
+│ • Apple Music: \`$30\` | Amazon Music: \`3M $25\`
+│ • Canva Pro: Invitación \`1M $6\` | Cuenta \`1M $20\`
+│ • CapCut: Perfil \`$25\` | Completa \`$55\`
+│ • ChatGPT: Perfil \`$45\` | Gemini: \`18M $60\`
+└──────────────────────────────────────────
+
+┌─ 📋 *TRÁMITES DIGITALES*
+│ • Actas (Nacimiento, Matrimonio, etc.): \`$15\`
+│ • CURP Certificada: \`$15\` | Recibo CFE: \`$15\`
+│ • NSS / Vigencia IMSS / Semanas: \`$32\`
+│ • Antecedentes: Estatales \`$70\` | Federales \`$85\`
+│ • Permiso sin placas: \`$80\` | RFC original: \`$135\`
+└──────────────────────────────────────────
+
+┌─ 📲 *RECARGAS TELEFÓNICAS*
+│ • Telcel: $200 ➔ \`$175\`
+│ • Bait: $200 ➔ \`$170\` | $300 ➔ \`$260\`
+│ • Movistar: $200 ➔ \`$160\` | $300 ➔ \`$260\`
+│ • AT&T: $200 ➔ \`$165\` | $300 ➔ \`$250\`
+└──────────────────────────────────────────
+
+┌─ 💎 *DIAMANTES FREE FIRE*
+│ • 110: \`$26\` | 342: \`$65\` | 562: \`$88\`
+│ • 1,166: \`$145\` | 2,398: \`$300\` | Booyah: \`$45\`
+└──────────────────────────────────────────
+
+┌─ 📁 *EXTRAS & CREATIVO*
+│ • Mangas (+250) / Colorear / Disney: \`$25 c/u\`
+│ • Películas (+270): \`$50\` | Películas Barbie: \`$50 pack\`
+│ • APKs Android: \`$15 c/u\` o \`$100 todas\`
+│ • 42 Plantillas Canva: \`$55\` | Mega Pack PDFs: \`$70\`
+│ • Redes (1k seguidores IG/TikTok): \`$65 / $80\`
+└──────────────────────────────────────────
+
+> ⚠️ _Todo sujeto a disponibilidad. Pregunta antes de transferir._
+> 💳 _Escribe \`.pago\` para transferir o el comando específico para más detalles._`;
+                    await sock.sendMessage(remitente, { text: stockCompleto });
+                    return;
+                }
+
+                if (texto === '.streaming') {
+                    const streaming = 
+`╭─── 🩷 *APPSTOCK CLICK&CUT* 🩷 ───╮
+│    *CUENTAS Y PANTALLAS EN HD/4K*
+╰────────────────────────────────╯
+
+┌─ 🎬 *NETFLIX*
+│ 🦋 \`Solo TV:\` 1M $29 | 2M $38 | 3M $49 | 12M $75
+│ 🦋 \`Normal:\` 1M $49 | 2M $65 | 3M $82 | 12M $155
+│ 🦋 \`Privado:\` 1M $55 | 2M $69 | 3M $85
+│ 🔥 \`Cuenta Completa:\` 1M $215
+└────────────────────────────────
+
+┌─ 🏰 *DISNEY+ PREMIUM*
+│ 🦋 \`Perfil:\` 1M $15 | 2M $25 | 3M $28 | 12M $43
+│ 🔥 \`Cuenta Completa:\` 1M $56 | 2M $78 | 3M $89 | 12M $130
+└────────────────────────────────
+
+┌─ 📺 *MAX PREMIUM*
+│ 🦋 \`Perfil:\` 1M $15 | 2M $25 | 3M $34 | 12M $55
+│ 🔥 \`Cuenta Completa:\` 1M $45 | 2M $59 | 3M $78 | 12M $120
+└────────────────────────────────
+
+┌─ 📦 *PRIME VIDEO*
+│ 🦋 \`Perfil:\` 1M $10 | 2M $13 | 3M $19 | 12M $30
+│ 🔥 \`Cuenta Completa:\` 1M $28 | 2M $35 | 3M $45 | 12M $95
+└────────────────────────────────
+
+┌─ 💛 *VIX PREMIUM*
+│ 🦋 \`Perfil:\` 1M $9 | 2M $15 | 3M $19 | 12M $28
+│ 🔥 \`Cuenta Completa:\` 1M $13 | 2M $20 | 3M $29 | 12M $38
+└────────────────────────────────
+
+┌─ ⭐ *PARAMOUNT+*
+│ 🦋 \`Perfil:\` 1M $13 | 2M $18 | 3M $23 | 12M $30
+│ 🔥 \`Cuenta Completa:\` 1M $45 | 2M $55 | 3M $65 | 12M $110
+└────────────────────────────────
+
+┌─ 🍿 *CRUNCHYROLL*
+│ 🦋 \`Perfil:\` 1M $17 | 2M $24 | 3M $32 | 12M $48
+│ 🔥 \`Cuenta Completa:\` 1M $45 | 2M $65 | 3M $80 | 12M $110
+└────────────────────────────────
+
+┌─ 🦉 *DUOLINGO*
+│ 🦋 \`Perfil:\` 1M $12 | 2M $21 | 3M $26 | 12M $37
+│ 🔥 \`Cuenta Completa:\` 1M $14 | 2M $25 | 3M $29 | 12M $40
+└────────────────────────────────
+
+┌─ 🦊 *FOX ONE*
+│ 🦋 \`Perfil:\` 1M $19 | 2M $25 | 3M $35 | 12M $58
+│ 🔥 \`Cuenta Completa:\` 1M $55
+└────────────────────────────────
+
+┌─ 🎧 *APPLE TV*
+│ 🦋 \`Perfil:\` 1M $19 | 2M $25 | 3M $33 | 12M $48
+│ 🔥 \`Cuenta Completa:\` 1M $45 | 2M $70
+└────────────────────────────────
+
+┌─ 📺 *IPTV & CANALES*
+│ 🦋 \`IPTV Perfil:\` 1M $17 | 2M $27 | 3M $37 | 12M $57
+│ 🔥 \`IPTV Completa:\` 1M $45 | 2M $55 | 3M $65 | 12M $125
+│ 🔥 \`Claro + Canales:\` 1M $70
+└────────────────────────────────
+
+> 💜 _Todo sujeto a disponibilidad. Pregunta antes de transferir 🥰_
+> 💡 _Escribe \`.pago\` para obtener los datos bancarios._`;
+                    await sock.sendMessage(remitente, { text: streaming });
+                    return;
+                }
+
+                if (['.musica'].includes(texto)) {
+                    const musica = 
+`╭─── 🎶 *MÚSICA Y AUDIO PREMIUM* 🎶 ───╮
+│     *TUS PLAYLISTS SIN ANUNCIOS*
+╰────────────────────────────────╯
+
+┌─ ▶️ *YOUTUBE PREMIUM*
+│ • Invitación: \`1M $15\` | \`2M $27\` | \`3M $34\`
+│ • Individual: \`$22\` (tus datos) | \`$30\` (mis datos)
+│ • Familiar: \`$26\` (tus datos) | \`$30\` (mis datos)
+└────────────────────────────────
+
+┌─ 💚 *SPOTIFY PREMIUM*
+│ • 1 Mes ➔ \`$37\`
+│ • 2 Meses ➔ \`$45\`
+│ • 3 Meses ➔ \`$55\`
+│ • 6 Meses ➔ \`$85\`
+│ • Anual ➔ \`$135\`
+└────────────────────────────────
+
+┌─ 🎵 *DEEZER PREMIUM*
+│ • 1 Mes ➔ \`$14\`
+│ • 2 Meses ➔ \`$21\`
+│ • 3 Meses ➔ \`$26\`
+│ • 6 Meses ➔ \`$30\`
+│ • Anual ➔ \`$45\`
+└────────────────────────────────
+
+┌─ 🍎 *APPLE MUSIC*
+│ • Invitación ➔ \`$30\`
+│ • Individual ➔ \`$40\`
+│ • Familiar ➔ \`$70\`
+└────────────────────────────────
+
+┌─ 🌊 *TIDAL & AMAZON MUSIC*
+│ • Tidal ➔ \`$40\`
+│ • Amazon Music (Invitación) ➔ \`3M $25\`
+│ • Amazon Music (Completa) ➔ \`3M $40\`
+└────────────────────────────────
+
+> 💡 _Escribe \`.pago\` para realizar tu transferencia._`;
+                    await sock.sendMessage(remitente, { text: musica });
+                    return;
+                }
+
+                if (['.apps'].includes(texto)) {
+                    const apps = 
+`╭─── 🛠️ *HERRAMIENTAS & APPS* 🛠️ ───╮
+│    *PRODUCTIVIDAD, DISEÑO E IA*
+╰─────────────────────────────╯
+
+┌─ 🎨 *CANVA*
+│ • Invitación: \`1M $6\` | \`2M $11\` | \`3M $23\` | \`6M $27\` | \`12M $39\`
+│ • Pro Cuenta: \`1M $20\` | \`2M $35\` | \`3M $40\` | \`6M $50\` | \`12M $70\` | \`24M $100\`
+└─────────────────────────────
+
+┌─ 🎬 *CAPCUT*
+│ • Perfil ➔ \`1M $25\`
+│ • Completa ➔ \`1M $55\`
+└─────────────────────────────
+
+┌─ 🤖 *INTELIGENCIA ARTIFICIAL*
+│ • ChatGPT Perfil Individual: \`1M $45\` | \`3M $70\`
+│ • ChatGPT Compartido: \`$57\`
+│ • ChatGPT Go: \`$65\`
+│ • ChatGPT Plus: \`$85\`
+│ • Gemini Advanced: \`18M $60\`
+│ • IA Fiesta: \`1M $55\` | \`3M $90\` (Individual)
+└─────────────────────────────
+
+┌─ 📄 *MICROSOFT OFFICE 365*
+│ • Invitación: \`$19\`
+│ • Cuenta Individual: \`$47\`
+│ • Cuenta Completa: \`$55\`
+└─────────────────────────────
+
+┌─ 🎮 *JUEGOS Y DEPORTES*
+│ • DAZN: \`$35\`
+│ • Xbox Game Pass Code: \`$98\`
+└─────────────────────────────
+
+> 💡 _Escribe \`.pago\` para solicitar tu cuenta de inmediato._`;
+                    await sock.sendMessage(remitente, { text: apps });
+                    return;
+                }
+
+                if (['.extras'].includes(texto)) {
+                    const extras = 
+`╭─── 📁✨ *EXTRAS & DIGITAL CLICK&CUT* ✨📁 ───╮
+│       *DRIVES, PLANTILLAS, APKS Y MÁS*
+╰─────────────────────────────────────────╯
+
+┌─ 🔥 *MANGA ANIME EN DRIVE* — \`$25\`
+│ • Más de 250 mangas completos organizados
+└─────────────────────────────────────────
+
+┌─ 🌈 *LIBROS PARA COLOREAR CUTE* — \`$25\`
+│ • Drive con más de 30 libros listos para imprimir
+└─────────────────────────────────────────
+
+┌─ 🎬 *PELÍCULAS EN DRIVE* — \`$50\`
+│ • Más de 270 películas (estrenos y clásicas)
+└─────────────────────────────────────────
+
+┌─ ✨ *LIBROS DISNEY PARA COLOREAR* — \`$25\`
+│ • Formato digital de alta calidad para peques
+└─────────────────────────────────────────
+
+┌─ 📲 *APKS PARA ANDROID*
+│ • Más de 25 aplicaciones funcionales
+│ • \`$15 c/u\` a elegir ó \`$100 por todas\`
+└─────────────────────────────────────────
+
+┌─ 🩷 *PELÍCULAS BARBIE (2001 - 2013)*
+│ • Películas individuales: \`$15 c/u\`
+│ • Colección completa: \`$50\`
+└─────────────────────────────────────────
+
+┌─ 🎨 *42 PLANTILLAS CANVA PRO* — \`$55\`
+│ • Trámites, recetas, diseños y formatos editables
+└─────────────────────────────────────────
+
+> 💡 _Escribe \`.pago\` para adquirir tu enlace de descarga inmediato._`;
+                    await sock.sendMessage(remitente, { text: extras });
+                    return;
+                }
+
+                if (['.medicos', '.recetas'].includes(texto)) {
+                    const medicos = 
+`╭── 💗🩺 *DOCUMENTOS MÉDICOS* 🩺💗 ──╮
+│    *CLICK & CUT GESTIÓN PERSONAL*
+╰─────────────────────────────╯
+
+┌─ 🏥 *RECETAS MÉDICAS*
+│ • Receta IMSS ➔ \`$50\`
+│ • Receta ISSSTE ➔ \`$50\`
+│ • Receta Farmacias Similares ➔ \`$45\`
+│ • Receta Farmacia del Ahorro ➔ \`$45\`
+│ • Receta particular ➔ \`$45\`
+│ • Análisis de laboratorio ➔ \`$100\`
+│ • Nota médica de urgencias ➔ \`$70\`
+└─────────────────────────────
+
+┌─ 📋 *INCAPACIDADES*
+│ • De 1 a 3 días ➔ \`$40\`
+│ • De 4 a 9 días ➔ \`$50\`
+│ • 9 días en adelante ➔ _(Cotizar con asesor)_
+│ • Hoja de discapacidad ➔ \`$100\`
+└─────────────────────────────
+
+┌─ 👨‍👩‍👧 *FORMATOS PERSONALES*
+│ • Hoja de concubinato ➔ \`$130\`
+│ • No deudor alimentario (Edomex / Federal) ➔ \`$60\`
+└─────────────────────────────
+
+> 💡 _Escribe \`.pago\` y adjunta los datos requeridos para tu formato._`;
+                    await sock.sendMessage(remitente, { text: medicos });
+                    return;
+                }
+
                 if (['.combos', '.duos', '.promos'].includes(texto)) {
                     const combos = 
 `╭─── 🎀 *COMBOS CLICK & CUT* 🎀 ───╮
@@ -458,133 +833,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // STREAMING
-                if (['.streaming'].includes(texto)) {
-                    const streaming = 
-`╭─── 📺 *STREAMING & SERIES* 📺 ───╮
-│    *CUENTAS Y PANTALLAS EN HD/4K*
-╰─────────────────────────────╯
-
-┌─ 🎬 *NETFLIX*
-│ • Solo TV: \`1M $29\` | \`2M $38\` | \`3M $49\` | \`12M $75\`
-│ • Normal: \`1M $49\` | \`2M $65\` | \`3M $82\` | \`12M $155\`
-│ • Privado: \`1M $55\` | \`2M $69\` | \`3M $85\`
-│ • Cuenta Completa: \`1M $215\`
-└─────────────────────────────
-
-┌─ 🏰 *DISNEY+ PREMIUM*
-│ • Perfil: \`1M $15\` | \`2M $25\` | \`3M $38\` | \`12M $52\`
-│ • Completa: \`1M $56\` | \`2M $78\` | \`3M $89\` | \`12M $155\`
-└─────────────────────────────
-
-┌─ 📺 *MAX PREMIUM*
-│ • Perfil: \`1M $15\` | \`2M $25\` | \`3M $34\` | \`12M $55\`
-│ • Completa: \`1M $45\` | \`2M $59\` | \`3M $78\` | \`12M $120\`
-└─────────────────────────────
-
-┌─ 📦 *PRIME VIDEO*
-│ • Perfil: \`1M $10\` | \`2M $13\` | \`3M $19\` | \`12M $30\`
-│ • Completa: \`1M $28\` | \`2M $35\` | \`3M $45\` | \`12M $95\`
-└─────────────────────────────
-
-┌─ 💛 *VIX PREMIUM*
-│ • Perfil: \`1M $9\` | \`2M $15\` | \`3M $19\` | \`12M $28\`
-│ • Completa: \`1M $13\` | \`2M $20\` | \`3M $29\` | \`12M $38\`
-└─────────────────────────────
-
-┌─ ⭐ *PARAMOUNT+*
-│ • Perfil: \`1M $13\` | \`2M $18\` | \`3M $23\` | \`12M $30\`
-│ • Completa: \`1M $45\` | \`2M $55\` | \`3M $65\` | \`12M $110\`
-└─────────────────────────────
-
-┌─ 🍿 *CRUNCHYROLL & MÁS*
-│ • Crunchyroll Perfil: \`1M $17\` | Completa: \`1M $45\`
-│ • Fox One Perfil: \`1M $19\` | Completa: \`1M $55\`
-│ • Apple TV Perfil: \`1M $19\` | Completa: \`1M $45\`
-│ • IPTV Perfil: \`1M $17\` | Completa: \`1M $45\`
-│ • Claro con Canales: \`1M $70\`
-└─────────────────────────────
-
-> 💡 _Escribe \`.pago\` para obtener los datos de depósito._`;
-                    await sock.sendMessage(remitente, { text: streaming });
-                    return;
-                }
-
-                // MÚSICA
-                if (['.musica'].includes(texto)) {
-                    const musica = 
-`╭─── 🎶 *MÚSICA Y AUDIO PREMIUM* 🎶 ───╮
-│    *TUS PLAYLISTS SIN ANUNCIOS*
-╰────────────────────────────────╯
-
-┌─ 💚 *SPOTIFY PREMIUM*
-│ • 1 Mes ➔ \`$37\`
-│ • 2 Meses ➔ \`$45\`
-│ • 3 Meses ➔ \`$55\`
-│ • 6 Meses ➔ \`$85\`
-│ • 12 Meses (Anual) ➔ \`$135\`
-└────────────────────────────────
-
-┌─ ▶️ *YOUTUBE PREMIUM*
-│ • Invitación: \`1M $15\` | \`2M $27\` | \`3M $34\`
-│ • Individual: \`$22\` (tus datos) | \`$30\` (mis datos)
-│ • Familiar: \`$26\` (tus datos) | \`$30\` (mis datos)
-└────────────────────────────────
-
-┌─ 🎵 *DEEZER PREMIUM*
-│ • 1 Mes ➔ \`$14\`
-│ • 2 Meses ➔ \`$21\`
-│ • 3 Meses ➔ \`$26\`
-│ • 6 Meses ➔ \`$30\`
-│ • 12 Meses (Anual) ➔ \`$45\`
-└────────────────────────────────
-
-> 💡 _Escribe \`.pago\` para realizar tu transferencia._`;
-                    await sock.sendMessage(remitente, { text: musica });
-                    return;
-                }
-
-                // APPS
-                if (['.apps'].includes(texto)) {
-                    const apps = 
-`╭─── 🛠️ *HERRAMIENTAS & APPS* 🛠️ ───╮
-│    *PRODUCTIVIDAD, DISEÑO E IA*
-╰─────────────────────────────╯
-
-┌─ 🎨 *CANVA PRO*
-│ • Invitación: \`1M $6\` | \`2M $11\` | \`3M $23\` | \`12M $39\`
-│ • Pro Cuenta: \`1M $20\` | \`3M $40\` | \`6M $50\` | \`12M $70\`
-└─────────────────────────────
-
-┌─ 🤖 *INTELIGENCIA ARTIFICIAL*
-│ • ChatGPT Perfil: \`$45 (1M)\` | \`$70 (3M)\`
-│ • ChatGPT Compartido: \`$57\`
-│ • ChatGPT Go: \`$65\`
-│ • ChatGPT Plus: \`$85\`
-│ • Gemini Advanced: \`18M $60\`
-└─────────────────────────────
-
-┌─ 🦉 *DUOLINGO PLUS*
-│ • Perfil: \`1M $12\` | \`2M $21\` | \`12M $37\`
-│ • Completa: \`1M $14\` | \`2M $25\` | \`12M $40\`
-└─────────────────────────────
-
-┌─ 📄 *MICROSOFT OFFICE 365*
-│ • Invitación: \`$19\`
-│ • Cuenta Individual: \`$47\`
-│ • Cuenta Completa: \`$55\`
-└─────────────────────────────
-
-┌─ 🎮 *XBOX GAME PASS*
-│ • Game Pass Code: \`$98\`
-└─────────────────────────────
-
-> 💡 _Escribe \`.pago\` para solicitar tu cuenta de inmediato._`;
-                    await sock.sendMessage(remitente, { text: apps });
-                    return;
-                }
-
-                // TRÁMITES
                 if (['.tramites', '.servicios'].includes(texto)) {
                     const tramites = 
 `╭── ✧˚｡⋆ *TRÁMITES Y SERVICIOS* ✧˚｡⋆ ──╮
@@ -634,41 +882,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // EXTRAS
-                if (['.extras', '.medicos'].includes(texto)) {
-                    const extras = 
-`╭── 💗🩺 *DOCUMENTOS MÉDICOS* 🩺💗 ──╮
-│    *CLICK & CUT GESTIÓN PERSONAL*
-╰─────────────────────────────╯
-
-┌─ 🏥 *RECETAS MÉDICAS*
-│ • Receta IMSS ➔ \`$50\`
-│ • Receta ISSSTE ➔ \`$50\`
-│ • Receta Farmacias Similares ➔ \`$45\`
-│ • Receta Farmacia del Ahorro ➔ \`$45\`
-│ • Receta particular ➔ \`$45\`
-│ • Análisis de laboratorio ➔ \`$100\`
-│ • Nota médica de urgencias ➔ \`$70\`
-└─────────────────────────────
-
-┌─ 📋 *INCAPACIDADES*
-│ • De 1 a 3 días ➔ \`$40\`
-│ • De 4 a 9 días ➔ \`$50\`
-│ • 9 días en adelante ➔ _(Cotizar con asesor)_
-│ • Hoja de discapacidad ➔ \`$100\`
-└─────────────────────────────
-
-┌─ 👨‍👩‍👧 *FORMATOS PERSONALES*
-│ • Hoja de concubinato ➔ \`$130\`
-│ • No deudor alimentario (Edomex / Federal) ➔ \`$60\`
-└─────────────────────────────
-
-> 💡 _Escribe \`.pago\` y adjunta los datos que llevará tu formato._`;
-                    await sock.sendMessage(remitente, { text: extras });
-                    return;
-                }
-
-                // RECARGAS
                 if (['.recargas', '.tiempoaire'].includes(texto)) {
                     const recargas = 
 `╭─── ✨ *RECARGAS TELEFÓNICAS* ✨ ───╮
@@ -705,7 +918,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // DIAMANTES
                 if (['.setdiamantes', '.diamantes', '.freefire'].includes(texto)) {
                     const diamantes = 
 `╭─── 💎 *DIAMANTES FREE FIRE* 💎 ───╮
@@ -734,7 +946,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // LIBROS
                 if (['.libros', '.pdf', '.megapack', '.pack'].includes(texto)) {
                     const libros = 
 `╭─── 🔥 *MEGA PACK 1000 EN PDF* 🔥 ───╮
@@ -755,7 +966,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // REDES SOCIALES
                 if (['.redes', '.seguidores'].includes(texto)) {
                     const redes = 
 `╭─── 🚀 *CRECIMIENTO SOCIAL* 🚀 ───╮
@@ -788,7 +998,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // NÚMEROS VIRTUALES
                 if (['.numeros', '.virtuales'].includes(texto)) {
                     const virtuales = 
 `╭── 📱✨ *NÚMEROS VIRTUALES* ✨📱 ──╮
@@ -805,34 +1014,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // CATÁLOGO COMPACTO
-                if (['.catalogo'].includes(texto)) {
-                    const stockCompleto = 
-`╭─── 🩷 *STOCK GENERAL CLICK&CUT* 🩷 ───╮
-│     *RESUMEN RÁPIDO DE PRECIOS*
-╰──────────────────────────────╯
-
-┌─ 🎬 *STREAMING*
-│ • Netflix TV: \`1M $29\` | Normal: \`1M $49\` | Completa: \`$215\`
-│ • Disney+ Perfil: \`1M $15\` | Completa: \`1M $56\`
-│ • Max Perfil: \`1M $15\` | Completa: \`1M $45\`
-│ • Prime Perfil: \`1M $10\` | Completa: \`1M $28\`
-│ • Vix Perfil: \`1M $9\` | Completa: \`1M $13\`
-│ • Paramount Perfil: \`1M $13\` | Crunchy Perfil: \`1M $17\`
-└──────────────────────────────
-
-┌─ 🎶 *MÚSICA & APPS*
-│ • Spotify: \`1M $37\` | YouTube Invitación: \`1M $15\`
-│ • Canva Invitación: \`1M $6\` | Canva Pro: \`1M $20\`
-│ • ChatGPT Perfil: \`1M $45\` | Office Invitación: \`$19\`
-└──────────────────────────────
-
-> ⚠️ _Todo sujeto a disponibilidad. Escribe \`.pago\` para comprar._`;
-                    await sock.sendMessage(remitente, { text: stockCompleto });
-                    return;
-                }
-
-                // CONTENIDO +18
                 if (['.adultos'].includes(texto)) {
                     const adultos = 
 `╭── 🔞 *CONTENIDO ADULTOS (+18)* 🔞 ──╮
@@ -853,7 +1034,33 @@ async function arrancarBot() {
                     return;
                 }
 
-                // DATOS DE PAGO
+                if (['.contacto'].includes(texto)) {
+                    const contacto = 
+`╭── 📱✨ *CANALES OFICIALES* ✨📱 ──╮
+│   *ATENCIÓN AL CLIENTE CLICK&CUT*
+╰─────────────────────────────╯
+
+┌─ 💬 *WHATSAPP OFICIAL*
+│ • \`+52 864 111 4514\`
+└─────────────────────────────
+
+┌─ 🌸 *REDES SOCIALES*
+│ • \`Facebook Click&Cut:\`
+│   https://www.facebook.com/share/1Eb5bH7FRe/?mibextid=wwXIfr
+│ • \`Facebook Personal:\`
+│   https://www.facebook.com/share/1DnL8mn1tK/?mibextid=wwXIfr
+└─────────────────────────────
+
+┌─ 💡 *ACCESOS RÁPIDOS*
+│ • \`.catalogo\` ➔ Stock resumido
+│ • \`.tramites\` ➔ Gestiones oficiales
+└─────────────────────────────
+
+> 💖 _¡Guarda nuestro número y síguenos para ver promos exclusivas!_`;
+                    await sock.sendMessage(remitente, { text: contacto });
+                    return;
+                }
+
                 if (['.pago'].includes(texto)) {
                     const pago = 
 `╭─── 🌸🪞 *DATOS DE TRANSFERENCIA* 🪞🌸 ───╮
@@ -874,7 +1081,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // GARANTÍA
                 if (['.garantia'].includes(texto)) {
                     const garantia = 
 `╭── 🛡️ *POLÍTICA DE GARANTÍAS* 🛡️ ──╮
@@ -894,7 +1100,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // PREGUNTAS FRECUENTES
                 if (['.dudas', '.faq'].includes(texto)) {
                     const dudas = 
 `╭── ❓ *PREGUNTAS FRECUENTES* ❓ ──╮
@@ -918,7 +1123,6 @@ Claro que sí, respaldamos tu cuenta con reposición inmediata (\`.garantia\`).
                     return;
                 }
 
-                // REGLAS
                 if (['.reglas'].includes(texto)) {
                     const reglas = 
 `╭── ✂️✨ *REGLAS DE SERVICIO* ✨✂️ ──╮
@@ -937,7 +1141,6 @@ Claro que sí, respaldamos tu cuenta con reposición inmediata (\`.garantia\`).
                     return;
                 }
 
-                // HORARIO
                 if (['.horario', '.atencion'].includes(texto)) {
                     const horario = 
 `╭── ⏰ *HORARIOS DE ATENCIÓN* ⏰ ──╮
@@ -954,25 +1157,6 @@ Claro que sí, respaldamos tu cuenta con reposición inmediata (\`.garantia\`).
                     return;
                 }
 
-                // CONTACTO
-                if (['.contacto'].includes(texto)) {
-                    const contacto = 
-`╭── 📱✨ *CANALES OFICIALES* ✨📱 ──╮
-│     *ATENCIÓN AL CLIENTE*
-╰─────────────────────────────╯
-
-┌─ 💬 *CONTACTO DIRECTO*
-│ • \`WhatsApp:\` +52 56 4469 5396
-│ • \`Catálogo:\` Escribe \`.catalogo\`
-│ • \`Trámites:\` Escribe \`.tramites\`
-└─────────────────────────────
-
-> 💖 _¡Guarda nuestro número para enterarte de promos en los estados!_`;
-                    await sock.sendMessage(remitente, { text: contacto });
-                    return;
-                }
-
-                // ASESOR
                 if (['.asesor', '.admin'].includes(texto)) {
                     await sock.sendMessage(remitente, {
                         text: `> 👨‍💻 *Click & Cut Soporte:* En un momento te atiende un asesor humano. Por favor escribe con detalle qué servicio deseas adquirir o adjunta tu comprobante aquí.`
@@ -981,9 +1165,7 @@ Claro que sí, respaldamos tu cuenta con reposición inmediata (\`.garantia\`).
                 }
             }
 
-            // ==========================================
-            // SECCIÓN 2: PERSONAJE CON INTELIGENCIA ARTIFICIAL
-            // ==========================================
+            // IA Gemini
             if (esPropio) return;
 
             const mencionado = textoOriginal.includes(`@${NUMERO_BOT}`) || textoOriginal.includes(`@${NUMERO_BOT_ALT}`);
