@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const NUMERO_BOT = "525644695396";
 const NUMERO_BOT_ALT = "5215644695396";
@@ -14,7 +14,7 @@ const MONGO_URI = process.env.MONGO_URI;
 
 // Inicializar API de Gemini
 const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 // System Instruction Click & Cut
 const SYSTEM_INSTRUCTION = `
@@ -1172,24 +1172,22 @@ Claro que sí, respaldamos tu cuenta con reposición inmediata (\`.garantia\`).
             const debeResponderIA = !esGrupo || (esGrupo && mencionado);
 
             if (debeResponderIA) {
-                if (!ai) {
+                if (!genAI) {
                     console.warn('[AVISO GEMINI] Falta configurar GEMINI_API_KEY en las variables de entorno.');
                     return;
                 }
 
                 try {
-                    const response = await ai.models.generateContent({
-                        model: 'gemini-2.5-flash',
-                        contents: textoOriginal,
-                        config: {
-                            systemInstruction: SYSTEM_INSTRUCTION,
-                            maxOutputTokens: 250,
-                            temperature: 0.7
-                        }
+                    const model = genAI.getGenerativeModel({
+                        model: 'gemini-1.5-flash',
+                        systemInstruction: SYSTEM_INSTRUCTION
                     });
 
-                    if (response && response.text) {
-                        await sock.sendMessage(remitente, { text: response.text }, { quoted: msg });
+                    const result = await model.generateContent(textoOriginal);
+                    const responseText = result.response.text();
+
+                    if (responseText) {
+                        await sock.sendMessage(remitente, { text: responseText }, { quoted: msg });
                     }
                 } catch (iaError) {
                     console.error('[ERROR GEMINI]', iaError.message);
