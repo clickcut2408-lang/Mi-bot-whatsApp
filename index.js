@@ -5,7 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { GoogleGenAI } = require('@google/genai');
 
-const NUMERO_BOT = "528641114514";
+const NUMERO_BOT = "525644695396";
+const NUMERO_BOT_ALT = "5215644695396";
 const NUMERO_ADMIN = "5218641114514";
 const PORT = process.env.PORT || 3000;
 
@@ -88,9 +89,9 @@ async function arrancarBot() {
                 console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCode} <<<`);
                 console.log('=========================================\n');
             } catch (err) {
-                console.log('[ERROR VINCULACION] Reintentando codigo...');
+                console.log('[ERROR VINCULACION] Reintentando con prefijo alterno...');
                 try {
-                    const pairingCodeAlt = await sock.requestPairingCode("5218641114514");
+                    const pairingCodeAlt = await sock.requestPairingCode(NUMERO_BOT_ALT);
                     console.log('\n=========================================');
                     console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCodeAlt} <<<`);
                     console.log('=========================================\n');
@@ -186,7 +187,7 @@ async function arrancarBot() {
             // SECCIÓN 1: PROCESAR COMANDOS TRADICIONALES
             // ==========================================
             if (esComando) {
-                const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT;
+                const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT || remitenteNumero === NUMERO_BOT_ALT;
 
                 // COMANDO .SET (ADMIN)
                 if (texto.startsWith('.set')) {
@@ -961,7 +962,7 @@ Claro que sí, respaldamos tu cuenta con reposición inmediata (\`.garantia\`).
 ╰─────────────────────────────╯
 
 ┌─ 💬 *CONTACTO DIRECTO*
-│ • \`WhatsApp:\` +52 864 111 4514
+│ • \`WhatsApp:\` +52 56 4469 5396
 │ • \`Catálogo:\` Escribe \`.catalogo\`
 │ • \`Trámites:\` Escribe \`.tramites\`
 └─────────────────────────────
@@ -985,7 +986,7 @@ Claro que sí, respaldamos tu cuenta con reposición inmediata (\`.garantia\`).
             // ==========================================
             if (esPropio) return;
 
-            const mencionado = textoOriginal.includes(`@${NUMERO_BOT}`) || textoOriginal.includes(`@5218641114514`);
+            const mencionado = textoOriginal.includes(`@${NUMERO_BOT}`) || textoOriginal.includes(`@${NUMERO_BOT_ALT}`);
             const debeResponderIA = !esGrupo || (esGrupo && mencionado);
 
             if (debeResponderIA) {
