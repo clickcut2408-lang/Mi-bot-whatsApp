@@ -1,14 +1,18 @@
 {
-  "name": "mi-bot-whatsapp",
+  "name": "clickcut-whatsapp-bot",
   "version": "1.0.0",
-  "description": "Bot de WhatsApp con personaje para Click & Cut",
+  "description": "Bot oficial de WhatsApp para Click & Cut",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@google/genai": "latest",
-    "@whiskeysockets/baileys": "^6.7.8",
+    "@google/genai": "^0.1.1",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "mongoose": "^8.2.1",
     "pino": "^8.19.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
