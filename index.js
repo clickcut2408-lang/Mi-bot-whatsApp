@@ -754,16 +754,6 @@ _*L I S T A  -  D E  -  C O M A N D O S*_
                 }
 
                 // ==========================================
-                // BUSCADOR DE COMANDOS EN MONGODB
-                // ==========================================
-                const comandoBuscado = texto.split(/\s+/)[0].replace('.', '');
-                const cmdEncontrado = await ComandoModel.findOne({ nombre: comandoBuscado });
-                if (cmdEncontrado) {
-                    await sock.sendMessage(remitente, { text: cmdEncontrado.contenido });
-                    return;
-                }
-
-                // ==========================================
                 // COMANDOS DE CONTROL DE GRUPOS
                 // ==========================================
                 if (texto === '.grupos' && esAdministrador) {
@@ -806,7 +796,7 @@ _*L I S T A  -  D E  -  C O M A N D O S*_
                 }
 
                 // ==========================================
-                // MENÚ PÚBLICO
+                // MENÚ PÚBLICO Y COMANDOS OFICIALES
                 // ==========================================
                 if (['.menu', '.ayuda'].includes(texto)) {
                     const menu = 
@@ -856,7 +846,9 @@ _*L I S T A  -  D E  -  C O M A N D O S*_
                 }
 
                 if (texto === '.catalogo' || texto === '.streaming' || texto === '.stock') {
-                    await sock.sendMessage(remitente, { text: STOCK_DEFAULT });
+                    const stockEnBD = await ComandoModel.findOne({ nombre: 'stock' });
+                    const contenidoStock = stockEnBD ? stockEnBD.contenido : STOCK_DEFAULT;
+                    await sock.sendMessage(remitente, { text: contenidoStock });
                     return;
                 }
 
@@ -906,6 +898,16 @@ _*L I S T A  -  D E  -  C O M A N D O S*_
                     await sock.sendMessage(remitente, {
                         text: `> 👨‍💻 *Click & Cut Soporte:* En un momento te atiende un asesor humano. Por favor escribe con detalle qué servicio deseas adquirir o adjunta tu comprobante aquí.`
                     });
+                    return;
+                }
+
+                // ==========================================
+                // BUSCADOR DE COMANDOS EN MONGODB (DINÁMICOS)
+                // ==========================================
+                const comandoBuscado = texto.split(/\s+/)[0].replace('.', '');
+                const cmdEncontrado = await ComandoModel.findOne({ nombre: comandoBuscado });
+                if (cmdEncontrado) {
+                    await sock.sendMessage(remitente, { text: cmdEncontrado.contenido });
                     return;
                 }
             }
