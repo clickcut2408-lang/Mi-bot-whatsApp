@@ -4,8 +4,8 @@ const http = require('http');
 const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const NUMERO_BOT = "525644695396";
-const NUMERO_BOT_ALT = "5215644695396";
+const NUMERO_BOT = "528641265554";
+const NUMERO_BOT_ALT = "5218641265554";
 const NUMERO_ADMIN = "5218641114514";
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
