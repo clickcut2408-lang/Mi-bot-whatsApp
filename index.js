@@ -277,6 +277,10 @@ async function arrancarBot() {
         await mongoose.connect(MONGO_URI);
         console.log('✅ [BD] Conexión establecida con MongoDB Atlas');
         
+        // LIMPIEZA TEMPORAL: Fuerza la creación de un nuevo código de vinculación
+        await AuthModel.deleteMany({});
+        console.log('🗑️ Sesión anterior eliminada. Esperando nuevo código...');
+
         const stockExiste = await ComandoModel.findOne({ nombre: 'stock' });
         if (!stockExiste) {
             await ComandoModel.create({ nombre: 'stock', contenido: STOCK_DEFAULT });
