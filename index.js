@@ -1,50 +1,267 @@
-const { default: makeWASocket, DisconnectReason, delay, proto, initAuthCreds, BufferJSON } = require('@whiskeysockets/baileys');
-const pino = require('pino');
-const http = require('http');
-const mongoose = require('mongoose');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+import makeWASocket, { 
+    DisconnectReason, 
+    delay, 
+    proto, 
+    initAuthCreds, 
+    BufferJSON 
+} from '@whiskeysockets/baileys';
+import pino from 'pino';
+import http from 'http';
+import mongoose from 'mongoose';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const NUMERO_BOT = "528641265554";
-const NUMERO_BOT_ALT = "5218641265554";
+// Números de control y entorno
+const NUMERO_BOT = process.env.BOT_PHONE_NUMBER || "5218641265554";
 const NUMERO_ADMIN = "5218641114514";
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 
-// Control de encendido/apagado del bot y tiempo de actividad
 let botActivo = true;
 const tiempoInicio = Date.now();
 
-// Inicializar API de Gemini
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
-// System Instruction Click & Cut
+// ==========================================
+// NUEVO STOCK ACTUALIZADO
+// ==========================================
+const STOCK_DEFAULT = `🖤 *CLICK&CUT* 🖤
+🤍TU TIENDA DIGITAL🤍
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+
+🎬 𝗡𝗲𝘁𝗳𝗹𝗶𝘅 Premium:
+📌•Pantalla compartida con PIN personal.
+*1M $45 | 3M $85 | 12M $150*
+
+🎬 𝗡𝗲𝘁𝗳𝗹𝗶𝘅 Privado:
+📌• Perfil exclusivo para ti.
+*1M $55 | 3M $85 | 12M $165*
+
+🎬 Netflix extra bug:
+📌•Acceso directo sin caídas ni bloqueos de hogar.
+*1M $40 | 3M $65 | 12M $100*
+
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦
+🎬 𝗡𝗲𝘁𝗳𝗹𝗶𝘅 Premium:
+• 1M $55 | 3M $95 | 12M $190
+
+🎬 𝗡𝗲𝘁𝗳𝗹𝗶𝘅 Privado:
+• 1M $65 | 3M $85 | 12M $185
+
+🎬 Netflix extra bug:
+• 1M $45 | 3M $65 | 12M $130
+
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+🏰 𝗗𝗶𝘀𝗻𝗲𝘆+ Premium:
+1M $20 | 3M $45 | 12M $85
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦
+🏰 𝗗𝗶𝘀𝗻𝗲𝘆 Premium:
+1M $65 | 3M $95 | 12M $185
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+📺 𝗠𝗔𝗫 Premium:
+1M $25 | 3M $45 | 12M $75
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+📺 𝗠𝗔𝗫 Premium:
+1M $50 | 3M $85 | 12M $135
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+📦 𝗣𝗿𝗶𝗺𝗲 Video:
+1M $25 | 3M $35 | 12M $55
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+📦 𝗣𝗿𝗶𝗺𝗲 Video:
+1M $35 | 3M $65 | 12M $90
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+🩶 HBO MAX PLATINO:
+1M $25 | 3M $45 | 12M $135
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+1M $75 | 3M $95 | 12M $150
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+💛 𝗩𝗜𝗫:
+1M $14 | 3M $32 | 12M $45
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+💛 𝗩𝗜𝗫:
+1M $20 | 3M $35 | 12M $60
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+⭐ 𝗣𝗮𝗿𝗮𝗺𝗼𝘂𝗻𝘁+:
+1M $20 | 3M $35 | 12M $45
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+⭐ 𝗣𝗮𝗿𝗮𝗺𝗼𝘂𝗻𝘁+:
+1M $55 | 3M $75 | 12M $95
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+🍿 𝗖𝗿𝘂𝗻𝗰𝗵𝘆𝗿𝗼𝗹𝗹:
+1M $20 | 3M $35 | 12M $60
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+🍿 𝗖𝗿𝘂𝗻𝗰𝗵𝘆𝗿𝗼𝗹𝗹:
+1M $55 | 3M $75 | 12M $100
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+🦉 𝗗𝘂𝗼𝗹𝗶𝗻𝗴𝗼:
+1M $20 | 3M $35 | 12M $50
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+🦉 𝗗𝘂𝗼𝗹𝗶𝗻𝗴𝗼:
+1M $35 | 3M $50 | 12M $70
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+🦊 𝗙𝗼𝘅 𝗢𝗻𝗲:
+1M $24 | 3M $38 | 12M $60
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+🦊 𝗙𝗼𝘅 𝗢𝗻𝗲: 1M $65 | 3M $85
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+🎧 𝗔𝗽𝗽𝗹𝗲 𝗧𝗩:
+1M $23 | 3M $39 | 12M $60
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+🎧 𝗔𝗽𝗽𝗹𝗲 𝗧𝗩:
+1M $55 | 3M $75 | 12M $100
+━━━━━━━━━━━━━━━━━━
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦:
+📺 𝗜𝗣𝗧𝗩:
+1M $26 | 3M $40 | 12M $65
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦:
+📺 𝗜𝗣𝗧𝗩:
+1M $50 | 3M $80 | 12M $95
+━━━━━━━━━━━━━━━━━━
+📺 𝗖𝗹𝗮𝗿𝗼+𝗖𝗮𝗻𝗮𝗹𝗲𝘀:
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦: 1M $75
+*𝗖𝗹𝗮𝗿𝗼 video* : 1M $30 | 3M $50 | 12M $90
+━━━━━━━━━━━━━━━━━━
+🎬 *MUBI*:
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦: 1M $20 | 3M $35 | 12M $50
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦: 1M $50 | 3M $75 | 12M $100
+
+🫧 *Universal+ (a tus datos)*:
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦: 1M $25 | 3M $33 | 12M $45
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦: 1M $45 | 3M $58 | 12M $75
+
+⚽️ *DAZN + NFL*:
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦: 1M $38 | 3M $55 | 12M $85
+
+🏩 *VIKI RAKUTEN*:
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦: 1M $25 | 3M $45 | 12M $75
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦: 1M $65 | 3M $85 | 12M $100
+
+🇰🇷 *KOCOWA*:
+🦋 𝗣𝗘𝗥𝗙𝗜𝗟𝗘𝗦: 1M $20 | 3M $35 | 12M $58
+🔥 𝗖𝗨𝗘𝗡𝗧𝗔𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗔𝗦: 1M $30 | 3M $45 | 12M $65
+━━━━━━━━━━━━━━━━━━
+🎶 𝗠Ú𝗦𝗜𝗖𝗔
+━━━━━━━━━━━━━━━━━━
+▶️ *𝗬𝗼𝘂𝗧𝘂𝗯𝗲 Premium Invitación*: 1M $18 | 3M $29 | 12M $58
+▶️ *𝗬𝗼𝘂𝗧𝘂𝗯𝗲 Premium Individual*:
+• (tus datos): 1M $25 | 3M $45 | 12M $85
+• (mis datos): 1M $30 | 3M $50 | 12M $100
+▶️ *𝗬𝗼𝘂𝗧𝘂𝗯𝗲 Familiar*:
+• (tus datos): 1M $35 | 3M $48 | 12M $85
+• (mis datos): 1M $40 | 3M $58 | 12M $95
+
+💚 *SPOTIFY Individual*:
+1M $45 | 3M $85 | 12M $150
+
+🎵 *DEEZER*:
+1M $22 | 3M $43 | 12M $65
+
+🎵 *APPLE MUSIC*:
+• Invitación: 1M $30 | 3M $60 | 12M $95
+• Individual: 1M $45 | 3M $65 | 12M $100
+• Familiar: 1M $60 | 3M $75
+
+🎶 *TIDAL*:
+1M $35 | 3M $45 | 12M $75
+
+🎧 *AMAZON MUSIC*:
+🦋 Por invitación: 1M $20 | 3M $35 | 12M $55
+🔥 Completa: 1M $25 | 3M $40 | 12M $65
+━━━━━━━━━━━━━━━━━━
+🫦 𝗢𝗧𝗥𝗢𝗦 & APPS
+━━━━━━━━━━━━━━━━━━
+🎨 *CANVA*:
+• Invitación: 1M $15 | 3M $25 | 12M $40
+• Pro: 1M $25 | 3M $35 | 12M $60
+
+📸 *CAPCUT PRO*:
+🦋 Acceso: 1M $30 | 3M $52 | 12M $85
+🔥 Completa: 1M $70 | 3M $78 | 12M $100
+
+📸 *PICSART*:
+🦋 Acceso: 1M $25 | 3M $42 | 12M $55
+🔥 Completa: 1M $60 | 3M $75 | 12M $100
+
+🎬 *PELICULAS & LIBROS* 📚:
+• Películas: $20
+• Libros (PDF): 1x $20 o 3x $50
+━━━━━━━━━━━━━━━━━━
+🤖 𝗜𝗡𝗧𝗘𝗟𝗜𝗚𝗘𝗡𝗖𝗜𝗔 𝗔𝗥𝗧𝗜𝗙𝗜𝗖𝗜𝗔𝗟
+━━━━━━━━━━━━━━━━━━
+🤖 *CHATGPT*:
+• ChatGPT Go (Compartida): 1M $65 | Completa: $165
+• ChatGPT Plus (Compartida): 1M $85 | Completa: 1M $185
+
+🫧 *GEMINI*:
+• Invitación: 18M $75
+
+🔮 *IA FIESTA*:
+1M $45 | 12M $145
+━━━━━━━━━━━━━━━━━━
+🔥 𝗘𝗫𝗧𝗥𝗔𝗦 & PRODUCTIVIDAD
+━━━━━━━━━━━━━━━━━━
+🎮 *VIDEOJUEGOS*:
+• Game Pass Code: $120
+• Game Pass Ultimate: $350
+
+🪷 *VPN SURFSHARK*:
+🔥 Completa: 1M $75 | 3M $95
+
+🐦‍🔥 *APK DRAMA BOX*: $48
+
+🖱 *OFFICE (tus datos)*:
+• Individual: $30 | Invitación: $25 | Completa: $45 | Familiar: $55
+
+🖱 *MICROSOFT 365*:
+• Invitación: $25 | Completa (tus datos): $45
+━━━━━━━━━━━━━━━━━━
+⚠️ +𝟭𝟴 𝗦𝗼𝗹𝗼 𝗺𝗮𝘆𝗼𝗿𝗲𝘀 𝗱𝗲 𝗲𝗱𝗮𝗱 ⚠️
+━━━━━━━━━━━━━━━━━━
+🔥 *BRAZZERS*:
+🦋 Perfil: 1M $25 | 3M $33 | 12M $48
+🔥 Completa: 1M $30 | 3M $45 | 12M $55
+
+🔥 *PORNHUB*:
+🦋 Perfil: 1M $30 | 3M $45 | 12M $60
+🔥 Completa: 1M $38 | 3M $48 | 12M $70
+
+💜 Todo sujeto a disponibilidad.
+💜 Pregunta antes de transferir 🥰`;
+
 const SYSTEM_INSTRUCTION = `
 Eres la asistente virtual y anfitriona oficial de "Click & Cut".
 Representas a la chica de la marca: dulce, tierna, educada, súper atenta, paciente y muy servicial.
 Hablas siempre en femenino ("encantada de ayudarte", "lista para atenderte").
 
-Servicios principales que ofreces con calidez:
-1. Streaming Digital: Cuentas y perfiles (Netflix, Disney+, Max, Prime, Vix, Paramount, Spotify, YouTube, Apple Music, Tidal, Amazon Music). Renovaciones y activaciones.
-2. Trámites y servicios digitales: Actas de registro civil, CURP certificada, RFC/SAT, citas, constancias IMSS/ISSSTE, antecedentes, licencias y formatos.
-3. Papelería creativa, diseño y recursos: Stickers personalizados, etiquetas escolares, 42 plantillas Canva, libros para colorear, mangas y proyectos digitales.
-4. Servicios adicionales: Recargas con descuento (Telcel, Bait, Movistar, AT&T), diamantes Free Fire, seguidores en redes sociales y números virtuales.
+Servicios principales que ofreces:
+1. Streaming Digital: Cuentas y perfiles (Netflix, Disney+, Max, Prime, Vix, Paramount, Spotify, YouTube, Apple Music, Tidal, Amazon Music, IPTV, etc.).
+2. Trámites y servicios digitales: Actas, CURP certificada, RFC/SAT, citas, constancias IMSS/ISSSTE.
+3. Papelería creativa y diseño: Stickers personalizados, etiquetas escolares, libros para colorear.
+4. Apps, Diseño y Gaming: Canva Pro, CapCut, Picsart, ChatGPT, Gemini, Game Pass, Office 365.
 
 Pautas de respuesta:
 - Tutea con dulzura, educación y respeto.
-- Usa emojis suaves y bonitos acordes a los servicios (🌸, ✨, 📺, 🍿, 💻, 📄, ✂️, 🎀, 💖).
-- Mantén las respuestas claras, ordenadas y directas sin saturar con textos eternos.
-- Menciona que pueden ver los precios escribiendo *.stock* o cotizar transferencias con *.pago*.
-- Si un cliente tiene dudas de cuentas caídas o reportes, pídele con dulzura su comprobante o captura de pantalla e indícale que escriba *.asesor* para que el equipo humano lo resuelva de inmediato.
+- Usa emojis suaves y bonitos (🌸, ✨, 📺, 🍿, 💻, 📄, ✂️, 🎀, 💖).
+- Si preguntan precios, básate en el stock oficial o diles que escriban .stock.
+- Para transferencias y datos bancarios diles que escriban .pago.
+- Para hablar con la dueña/humana diles que escriban .asesor.
 `;
 
 // ==========================================
 // MODELOS DE MONGODB
 // ==========================================
-const AuthSchema = new mongoose.Schema({
-    _id: String,
-    data: String
-});
+const AuthSchema = new mongoose.Schema({ _id: String, data: String });
 const AuthModel = mongoose.models.WhatsAppAuth || mongoose.model('WhatsAppAuth', AuthSchema);
 
 const ComandoSchema = new mongoose.Schema({
@@ -53,9 +270,7 @@ const ComandoSchema = new mongoose.Schema({
 });
 const ComandoModel = mongoose.models.Comando || mongoose.model('Comando', ComandoSchema);
 
-// ==========================================
-// ADAPTADOR DE AUTENTICACIÓN PARA MONGODB
-// ==========================================
+// Adaptador de autenticación para MongoDB
 async function useMongoDBAuthState(collectionPrefix = 'auth_session') {
     const writeData = async (data, id) => {
         try {
@@ -75,15 +290,6 @@ async function useMongoDBAuthState(collectionPrefix = 'auth_session') {
             return JSON.parse(doc.data, BufferJSON.reviver);
         } catch (e) {
             return null;
-        }
-    };
-
-    const removeData = async (id) => {
-        try {
-            const key = `${collectionPrefix}_${id}`;
-            await AuthModel.findByIdAndDelete(key);
-        } catch (e) {
-            console.error('[ERROR MONGODB DELETE]', e.message);
         }
     };
 
@@ -112,7 +318,7 @@ async function useMongoDBAuthState(collectionPrefix = 'auth_session') {
                             if (value) {
                                 await writeData(value, key);
                             } else {
-                                await removeData(key);
+                                await AuthModel.findByIdAndDelete(key);
                             }
                         }
                     }
@@ -123,171 +329,35 @@ async function useMongoDBAuthState(collectionPrefix = 'auth_session') {
     };
 }
 
-// Servidor HTTP para Render
+// Servidor Web para Render (Keep-Alive)
 http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot Click&Cut en linea');
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bot Click&Cut en línea 🌸');
 }).listen(PORT, () => {
-    console.log(`[HTTP] Servidor escuchando en el puerto ${PORT}`);
+    console.log(`[HTTP] Servidor en puerto ${PORT}`);
 });
 
 // ==========================================
-// CATÁLOGO DE STOCK ACTUALIZADO
-// ==========================================
-const STOCK_DEFAULT = 
-`✨ *APPSTOCK CLICK&CUT* ✨
-*¡Actualización de stock y precios!* 🩷
-━━━━━━━━━━━━━━━━━━
-
-🎬 *STREAMING & TV*
-
-🍿 *Netflix*
-• Normal: 1M $49 | 2M $65 | 3M $82 | 12M $155
-• Privado: 1M $55 | 2M $69 | 3M $85
-• Extra Privado (bug): 1M $45 | 12M $95
-• Completa: 1M $215
-
-🏰 *Disney+ Premium*
-• Perfil: 1M $15 | 2M $25 | 3M $32 | 12M $48
-• Completa: 1M $60 | 2M $82 | 3M $95 | 12M $145
-
-📺 *MAX Premium*
-• Perfil: 1M $18 | 2M $27 | 3M $38 | 12M $65
-• Completa: 1M $45 | 2M $59 | 3M $78 | 12M $120
-
-🩶 *HBO Max Platino*
-• Perfil: 1M $18 | 2M $29 | 3M $39 | 12M $130
-• Completa: 1M $75
-
-📦 *Prime Video*
-• Perfil: 1M $15 | 2M $20 | 3M $25 | 12M $40
-• Completa: 1M $28 | 2M $35 | 3M $45 | 12M $95
-
-💛 *ViX*
-• Perfil: 1M $9 | 2M $15 | 3M $19 | 12M $28
-• Completa: 1M $10 | 2M $15 | 3M $25 | 12M $40
-
-⭐ *Paramount+*
-• Perfil: 1M $18 | 2M $23 | 3M $29 | 12M $38
-• Completa: 1M $45 | 2M $55 | 3M $65 | 12M $110
-
-🍿 *Crunchyroll*
-• Perfil: 1M $19 | 2M $24 | 3M $32 | 12M $55
-• Completa: 1M $45 | 2M $65 | 3M $80 | 12M $110
-
-🦊 *Fox One*
-• Perfil: 1M $19 | 2M $25 | 3M $35 | 12M $58
-• Completa: 1M $55
-
-🎧 *Apple TV*
-• Perfil: 1M $22 | 2M $26 | 3M $33 | 12M $55
-• Completa: 1M $45 | 2M $70
-
-📺 *IPTV*
-• Perfil: 1M $19 | 2M $27 | 3M $38 | 12M $60
-• Completa: 1M $45 | 2M $55 | 3M $65 | 12M $125
-
-✨ *Más Streaming:*
-• Claro Video: $20 | Con Canales: 1M $70
-• Mubi: $15
-• Universal+: $15
-• DAZN: $40
-
-━━━━━━━━━━━━━━━━━━
-
-🎶 *MÚSICA*
-
-▶️ *YouTube Premium*
-• Invitación: 1M $15 | 2M $27 | 3M $34
-• Individual: $25 (tus datos) | $30 (mis datos)
-• Familiar: $30 (tus datos) | $35 (mis datos)
-
-💚 *Spotify*
-• 1M $38 | 2M $47 | 3M $58 | 6M $88 | 12M $135
-
-🎵 *Deezer*
-• 1M $17 | 2M $25 | 3M $28 | 6M $35 | 12M $55
-
-🍎 *Apple Music (1M)*
-• Invitación: $30 | Individual: $40 | Familiar: $70
-
-🎧 *Otras Plataformas*
-• Tidal: 1M $40
-• Amazon Music (3M): Invitación $25 | Completa $40
-
-━━━━━━━━━━━━━━━━━━
-
-🎨 *DISEÑO, IA & APRENDIZAJE*
-
-🎨 *Canva*
-• Invitación: 1M $6 | 2M $11 | 3M $23 | 6M $27 | 12M $39
-• Pro: 1M $20 | 2M $35 | 3M $40 | 6M $50 | 12M $70 | 24M $100
-
-🎬 *CapCut (1M)*
-• Perfil: $25 | Completa: $55
-
-🤖 *Inteligencia Artificial*
-• ChatGPT Go (Compartida): $45
-• ChatGPT Plus (Compartida): $85
-• Gemini (18M): $60
-• IA Fiesta: 1M $55 | 3M $90 | 12M $150
-
-🦉 *Duolingo*
-• Perfil: 1M $15 | 2M $21 | 3M $26 | 12M $45
-• Completa: 1M $20 | 2M $28 | 3M $32 | 12M $55
-
-━━━━━━━━━━━━━━━━━━
-
-💼 *PRODUCTIVIDAD & GAMING*
-
-📄 *Microsoft Office*
-• Invitación: $19
-• Individual: $47
-• Completa: $55
-• Familiar: $40
-
-🎮 *Videojuegos*
-• Game Pass Code: $98
-• Game Pass Ultimate: $320
-
-━━━━━━━━━━━━━━━━━━
-
-🔞 *ADULTOS (+18)*
-
-🔥 *Brazzers*
-• Perfil: 1M $14 | 2M $25 | 3M $28 | 12M $36
-• Completa: 1M $25 | 2M $32 | 3M $40 | 12M $60
-
-🔥 *Pornhub*
-• Perfil: 1M $15 | 2M $28 | 3M $32
-
-━━━━━━━━━━━━━━━━━━
-✨ Si buscas algo en específico y no está en la lista, pide ayuda al .asesor`;
-
-// ==========================================
-// FUNCIÓN PRINCIPAL DE ARRANQUE
+// ARRANQUE PRINCIPAL
 // ==========================================
 async function arrancarBot() {
     if (!MONGO_URI) {
-        console.error('❌ ERROR: Falta configurar MONGO_URI en Render.');
+        console.error('❌ Falta configurar MONGO_URI en Render.');
         return;
     }
 
     try {
         await mongoose.connect(MONGO_URI);
         console.log('✅ [BD] Conexión establecida con MongoDB Atlas');
-        
-        // LIMPIEZA TEMPORAL: Fuerza la creación de un nuevo código de vinculación
-        await AuthModel.deleteMany({});
-        console.log('🗑️ Sesión anterior eliminada. Esperando nuevo código...');
 
-        const stockExiste = await ComandoModel.findOne({ nombre: 'stock' });
-        if (!stockExiste) {
-            await ComandoModel.create({ nombre: 'stock', contenido: STOCK_DEFAULT });
-            console.log('📦 Catálogo inicial cargado en MongoDB.');
-        }
+        // Actualizar el stock base en MongoDB siempre con el catálogo más reciente
+        await ComandoModel.findOneAndUpdate(
+            { nombre: 'stock' },
+            { contenido: STOCK_DEFAULT },
+            { upsert: true }
+        );
     } catch (dbErr) {
-        console.error('❌ [ERROR MONGODB CONEXION]', dbErr.message);
+        console.error('❌ [ERROR MONGODB]', dbErr.message);
         await delay(5000);
         return arrancarBot();
     }
@@ -299,7 +369,7 @@ async function arrancarBot() {
         auth: state,
         printQRInTerminal: false,
         syncFullHistory: false,
-        markOnlineOnConnect: true
+        browser: ['Chrome (Linux)', '', '']
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -307,21 +377,15 @@ async function arrancarBot() {
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
-                const pairingCode = await sock.requestPairingCode(NUMERO_BOT);
+                const numeroLimpio = NUMERO_BOT.replace(/[^0-9]/g, '');
+                const pairingCode = await sock.requestPairingCode(numeroLimpio);
                 console.log('\n=========================================');
                 console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCode} <<<`);
                 console.log('=========================================\n');
             } catch (err) {
-                try {
-                    const pairingCodeAlt = await sock.requestPairingCode(NUMERO_BOT_ALT);
-                    console.log('\n=========================================');
-                    console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCodeAlt} <<<`);
-                    console.log('=========================================\n');
-                } catch (e) {
-                    console.log('[ERROR CRITICO CODIGO]', e.message);
-                }
+                console.error('[ERROR CODIGO VINCULACION]', err.message);
             }
-        }, 5000);
+        }, 6000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -330,7 +394,7 @@ async function arrancarBot() {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const debeReconectar = statusCode !== DisconnectReason.loggedOut;
             if (debeReconectar) {
-                await delay(3000);
+                await delay(4000);
                 arrancarBot();
             }
         } else if (connection === 'open') {
@@ -338,6 +402,7 @@ async function arrancarBot() {
         }
     });
 
+    // Bienvenida automática a grupos
     sock.ev.on('group-participants.update', async (update) => {
         try {
             const { id, participants, action } = update;
@@ -349,14 +414,14 @@ async function arrancarBot() {
 │  ¡Hola @${numeroLimpio}! 💖🍿
 ╰─────────────────────────────╯
 
-> ✨ Encuentra tus cuentas de streaming, apoyo en trámites digitales y papelería creativa hecha con amor.
+> ✨ Cuentas de streaming, trámites digitales, papelería creativa y más.
 
 ┌─ 💡 *PRIMEROS PASOS*
 │ • Escribe \`.stock\` o \`.menu\` para ver precios.
 │ • Escribe \`.asesor\` para atención personal.
 └─────────────────────────────
 
-> 🎀 _¡Ponte cómod@ y déjanos consentirte!_`;
+🎀 _¡Ponte cómod@ y déjanos consentirte!_`;
 
                     await sock.sendMessage(id, {
                         text: mensajeBienvenida,
@@ -365,10 +430,11 @@ async function arrancarBot() {
                 }
             }
         } catch (err) {
-            console.log('[ERROR EN BIENVENIDA]', err.message);
+            console.log('[ERROR BIENVENIDA]', err.message);
         }
     });
 
+    // Manejo de mensajes entrantes
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages ? chatUpdate.messages[0] : null;
@@ -390,9 +456,9 @@ async function arrancarBot() {
 
             if (!textoOriginal) return;
 
-            const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT || remitenteNumero === NUMERO_BOT_ALT;
+            const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT;
 
-            // Gestión de encendido / apagado
+            // Encendido y apagado
             if (textoOriginal.trim().toLowerCase() === '.on' && esAdministrador) {
                 botActivo = true;
                 await sock.sendMessage(remitente, { text: '🟢 *Bot activado y respondiendo.*' });
@@ -408,477 +474,160 @@ async function arrancarBot() {
             if (esPropio && !textoOriginal.trim().startsWith('.')) return;
 
             const esComando = textoOriginal.trim().startsWith('.');
-            const texto = textoOriginal
-                .toLowerCase()
-                .trim()
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "");
+            const texto = textoOriginal.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
             if (esComando) {
                 // ==========================================
-                // MENÚ PRIVADO EXCLUSIVO PARA ADMINISTRADOR
-                // ==========================================
-                if (['.adminmenu', '.menuadmin', '.panel'].includes(texto)) {
-                    if (!esAdministrador) {
-                        await sock.sendMessage(remitente, { text: '> ⛔ *Acceso restringido. Este menú es privado para el administrador.*' });
-                        return;
-                    }
-
-                    const menuPrivado = 
-`_*¡𝐇𝐨𝐥𝐚 𝐁𝐢𝐞𝐧𝐯𝐞𝐧𝐢𝐝@ Click&Cut 𝐄𝐬𝐩𝐞𝐫𝐨 𝐲 𝐭𝐞𝐧𝐠𝐚𝐬 𝐮𝐧 𝐠𝐫𝐚𝐧 𝐝𝐢𝐚 ☀️!*_
-
-┌────── •• ──────┐
-    「 _*𝐈𝐍𝐅𝐎 𝐃𝐄𝐋 𝐁𝐎𝐓*_ 」
-└────── •• ──────┘
-┃ 🫧 _𝖬𝐨𝐝𝐨_ : 𝐏𝐑𝐈𝐕𝐀𝐃𝐎
-┃ 🫧 _𝐅𝐞𝐜𝐡𝐚_ : 9 de septiembre
-┃ 🫧 _𝖢𝐨𝐦𝐚𝐧𝐝𝐨𝐬 𝐞𝐧 𝐭𝐨𝐭𝐚𝐥_ : 133
-┃ 🫧 _𝖢𝖱𝖤𝖠𝖣𝖮𝖱_ : BY JENIFER LOPEZ
-
-━━━━━━━━━━━━━━━
-_*L I S T A  -  D E  -  C O M A N D O S*_
-
-╭──「 INFO 📚 」──
-┃ 🫧 .botreglas
-┃ 🫧 .runtime
-┃ 🫧 .totalfunciones
-┃ 🫧 .Menu
-┃ 🫧 .Menujuegos
-┃ 🫧 .Menulogo
-┃ 🫧 .menuventas
-╰━━━━━━━━━━━⬣
-
-╭──「 GRUPOS 👥 」──
-┃ 🫧 .bye on / off
-┃ 🫧 .welc off
-┃ 🫧 .alv
-┃ 🫧 .add *<número>*
-┃ 🫧 .crear
-┃ 🫧 .delete
-┃ 🫧 .demote @user
-┃ 🫧 .infogp
-┃ 🫧 .guía
-┃ 🫧 .link
-┃ 🫧 .mute @user / .unmute @user
-┃ 🫧 .encuesta *<pregunta|opciones>*
-┃ 🫧 .promote @user
-┃ 🫧 .reglas
-┃ 🫧 .resetlink
-┃ 🫧 .setbye @user + texto
-┃ 🫧 .setreglas + Texto
-┃ 🫧 .setwelcome @user + texto
-┃ 🫧 .admins <texto>
-┃ 🫧 .kick @user
-┃ 🫧 .truco
-┃ 🫧 .setemojim <emoji|off>
-┃ 🫧 .setemoji <emoji|off>
-┃ 🫧 .sethidetag <texto|off>
-┃ 🫧 .setfoto <imagen|off>
-┃ 🫧 .ver
-┃ 🫧 .hidetag <texto>
-┃ 🫧 .setNombre *<texto>*
-┃ 🫧 .nombre
-╰━━━━━━━━━━━⬣
-
-╭──「 GESTIÓN DE STOCK & BOT ⚙️ 」──
-┃ 🫧 .setstock <nuevo stock>
-┃ 🫧 .set <cmd> | <texto>
-┃ 🫧 .delset <cmd>
-┃ 🫧 .cmdlist
-┃ 🫧 .abrir / .cerrar
-┃ 🫧 .grupos
-╰━━━━━━━━━━━⬣
-
-╭──「 FREE FIRE 📌 」──
-┃ 🫧 .4vs4
-┃ 🫧 .6vs6
-┃ 🫧 .8vs8
-┃ 🫧 .12vs12
-┃ 🫧 .16vs16
-┃ 🫧 .24vs24
-╰━━━━━━━━━━━⬣
-
-╭──「 RPG 🌠 」──
-┃ 🫧 .carrera
-┃ 🫧 .cazar
-┃ 🫧 .detective
-┃ 🫧 .escape
-┃ 🫧 .magia
-┃ 🫧 .fotoantiguabot$
-╰━━━━━━━━━━━⬣
-
-╭──「 STICKERS 🏞 」──
-┃ 🫧 .sticker
-┃ 🫧 .s
-┃ 🫧 .pfp @user
-┃ 🫧 .qc
-┃ 🫧 .scat
-┃ 🫧 .wm *<nombre>|<autor>*
-┃ 🫧 .emojimix *<emoji+emoji>*
-┃ 🫧 .brat
-┃ 🫧 .bratv
-╰━━━━━━━━━━━⬣
-
-╭──「 ON / OFF 📴 」──
-┃ 🫧 .on 🟢
-┃ 🫧 .off 🔴
-╰━━━━━━━━━━━⬣
-
-╭──「 DESCARGAS 📥 」──
-┃ 🫧 .imagen *<texto>*
-┃ 🫧 .tiktok <url>
-┃ 🫧 .ttmp3 🟡
-┃ 🫧 .tiktokmp3 🟡
-┃ 🫧 .fb *<link>*
-┃ 🫧 .mediafire *<link>*
-┃ 🫧 .music *<texto>*
-╰━━━━━━━━━━━⬣`;
-
-                    await sock.sendMessage(remitente, { text: menuPrivado });
-                    return;
-                }
-
-                // ==========================================
-                // ACCIONES DE GESTIÓN (ADMIN ONLY)
-                // ==========================================
-                if (texto === '.runtime') {
-                    if (!esAdministrador) return;
-                    const diff = Math.floor((Date.now() - tiempoInicio) / 1000);
-                    const horas = Math.floor(diff / 3600);
-                    const minutos = Math.floor((diff % 3600) / 60);
-                    const segundos = diff % 60;
-                    await sock.sendMessage(remitente, { text: `⏱️ *Tiempo activo:* ${horas}h ${minutos}m ${segundos}s` });
-                    return;
-                }
-
-                if (texto === '.totalfunciones') {
-                    if (!esAdministrador) return;
-                    const totalMongo = await ComandoModel.countDocuments();
-                    await sock.sendMessage(remitente, { text: `📊 *Total de funciones integradas:* 133 comandos (+${totalMongo} comandos personalizados en MongoDB).` });
-                    return;
-                }
-
-                if (texto.startsWith('.hidetag') || texto.startsWith('.admins')) {
-                    if (!esGrupo) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ Este comando solo funciona en grupos.' });
-                        return;
-                    }
-                    if (!esAdministrador) {
-                        await sock.sendMessage(remitente, { text: '> ⛔ *Comando exclusivo de la administradora.*' });
-                        return;
-                    }
-
-                    const meta = await sock.groupMetadata(remitente);
-                    let menciones = [];
-                    let contenido = textoOriginal.replace(/^\.\w+\s*/, '').trim() || '¡Atención a todos!';
-
-                    if (texto.startsWith('.admins')) {
-                        menciones = meta.participants.filter(p => p.admin).map(p => p.id);
-                        contenido = `📢 *LLAMADO A ADMINISTRADORES*\n\n${contenido}`;
-                    } else {
-                        menciones = meta.participants.map(p => p.id);
-                    }
-
-                    await sock.sendMessage(remitente, { text: contenido, mentions: menciones });
-                    return;
-                }
-
-                if (texto.startsWith('.kick') || texto.startsWith('.alv')) {
-                    if (!esGrupo || !esAdministrador) return;
-                    const menciones = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-                    const citado = msg.message?.extendedTextMessage?.contextInfo?.participant;
-                    const victimas = menciones.length > 0 ? menciones : (citado ? [citado] : []);
-
-                    if (victimas.length === 0) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ Menciona o responde al mensaje de quien deseas expulsar.' });
-                        return;
-                    }
-                    try {
-                        await sock.groupParticipantsUpdate(remitente, victimas, 'remove');
-                        await sock.sendMessage(remitente, { text: '> 👢 Usuario expulsado con éxito.' });
-                    } catch (e) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ No pude expulsar al usuario. Verifica que el bot sea admin.' });
-                    }
-                    return;
-                }
-
-                if (texto.startsWith('.add')) {
-                    if (!esGrupo || !esAdministrador) return;
-                    const numero = textoOriginal.slice(4).trim().replace(/[^0-9]/g, '');
-                    if (!numero) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ Ingresa el número: `.add 521XXXXXXXXXX`' });
-                        return;
-                    }
-                    try {
-                        await sock.groupParticipantsUpdate(remitente, [`${numero}@s.whatsapp.net`], 'add');
-                        await sock.sendMessage(remitente, { text: `> ✅ Solicitud enviada para agregar a +${numero}.` });
-                    } catch (e) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ Error al añadir al participante.' });
-                    }
-                    return;
-                }
-
-                if (texto.startsWith('.promote')) {
-                    if (!esGrupo || !esAdministrador) return;
-                    const menciones = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-                    if (menciones.length === 0) return;
-                    await sock.groupParticipantsUpdate(remitente, menciones, 'promote');
-                    await sock.sendMessage(remitente, { text: '> 🎖️ Usuario promovido a administrador.' });
-                    return;
-                }
-
-                if (texto.startsWith('.demote')) {
-                    if (!esGrupo || !esAdministrador) return;
-                    const menciones = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-                    if (menciones.length === 0) return;
-                    await sock.groupParticipantsUpdate(remitente, menciones, 'demote');
-                    await sock.sendMessage(remitente, { text: '> 📉 Rango de administrador retirado.' });
-                    return;
-                }
-
-                if (texto === '.link') {
-                    if (!esGrupo || !esAdministrador) return;
-                    try {
-                        const code = await sock.groupInviteCode(remitente);
-                        await sock.sendMessage(remitente, { text: `🔗 *Enlace del grupo:*\nhttps://chat.whatsapp.com/${code}` });
-                    } catch (e) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ El bot debe ser admin para sacar el link.' });
-                    }
-                    return;
-                }
-
-                if (texto === '.delete' || texto === '.del') {
-                    if (!esAdministrador) return;
-                    const quoted = msg.message?.extendedTextMessage?.contextInfo;
-                    if (quoted && quoted.stanzaId) {
-                        await sock.sendMessage(remitente, {
-                            delete: {
-                                remoteJid: remitente,
-                                fromMe: false,
-                                id: quoted.stanzaId,
-                                participant: quoted.participant
-                            }
-                        });
-                    }
-                    return;
-                }
-
-                // ==========================================
-                // GESTIÓN DE STOCK DIRECTO (.setstock)
-                // ==========================================
-                if (texto.startsWith('.setstock')) {
-                    if (!esAdministrador) {
-                        await sock.sendMessage(remitente, { text: '> ⛔ *Comando reservado para la administración.*' });
-                        return;
-                    }
-
-                    const nuevoStock = textoOriginal.slice(9).trim();
-                    if (!nuevoStock) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ *Pega el stock completo después del comando:* \`.setstock [texto]\`' });
-                        return;
-                    }
-
-                    await ComandoModel.findOneAndUpdate(
-                        { nombre: 'stock' },
-                        { contenido: nuevoStock },
-                        { upsert: true }
-                    );
-
-                    await sock.sendMessage(remitente, { text: '✅ *Stock actualizado con éxito en MongoDB Atlas.* Ya está disponible con `.stock`.' });
-                    return;
-                }
-
-                // ==========================================
-                // GESTOR DE COMANDOS EN MONGODB (.set / .addcmd)
-                // ==========================================
-                if (texto.startsWith('.set ') || texto.startsWith('.addcmd ')) {
-                    if (!esAdministrador) {
-                        await sock.sendMessage(remitente, { text: '> ⛔ *Este comando solo puede ser ejecutado por el administrador.*' });
-                        return;
-                    }
-
-                    const raw = textoOriginal.startsWith('.set ') ? textoOriginal.slice(5).trim() : textoOriginal.slice(8).trim();
-                    let nombreCmd, respuestaCmd;
-
-                    if (raw.includes('|')) {
-                        const partes = raw.split('|');
-                        nombreCmd = partes[0].trim().toLowerCase().replace('.', '');
-                        respuestaCmd = partes.slice(1).join('|').trim();
-                    } else {
-                        const partes = raw.split(/\s+/);
-                        nombreCmd = partes[0].toLowerCase().replace('.', '');
-                        respuestaCmd = raw.substring(partes[0].length).trim();
-                    }
-
-                    if (!nombreCmd || !respuestaCmd) {
-                        await sock.sendMessage(remitente, { text: '⚠️ *Uso:* `.set nombre | Mensaje de respuesta`' });
-                        return;
-                    }
-
-                    await ComandoModel.findOneAndUpdate(
-                        { nombre: nombreCmd },
-                        { contenido: respuestaCmd },
-                        { upsert: true }
-                    );
-
-                    await sock.sendMessage(remitente, { 
-                        text: `╭── ✅ *COMANDO GUARDADO EN BD* ──╮\n│ 🔹 *Comando:* \`.${nombreCmd}\`\n╰──────────────────────────────╯\n\n> 💬 *Respuesta:*\n${respuestaCmd}` 
-                    });
-                    return;
-                }
-
-                if (texto.startsWith('.delset ') || texto.startsWith('.delcmd ')) {
-                    if (!esAdministrador) return;
-                    const nombreCmd = textoOriginal.split(/\s+/)[1]?.toLowerCase().replace('.', '').trim();
-                    if (!nombreCmd) return;
-
-                    const eliminado = await ComandoModel.findOneAndDelete({ nombre: nombreCmd });
-                    if (eliminado) {
-                        await sock.sendMessage(remitente, { text: `> 🗑️ *El comando* \`.${nombreCmd}\` *ha sido eliminado de MongoDB.*` });
-                    } else {
-                        await sock.sendMessage(remitente, { text: `> ⚠️ *No se encontró el comando* \`.${nombreCmd}\`*.` });
-                    }
-                    return;
-                }
-
-                if (['.cmdlist', '.comandos'].includes(texto)) {
-                    if (!esAdministrador) return;
-                    const cmds = await ComandoModel.find({}, 'nombre');
-                    if (cmds.length === 0) {
-                        await sock.sendMessage(remitente, { text: '> ℹ️ No tienes comandos personalizados guardados en MongoDB.' });
-                        return;
-                    }
-                    let lista = `╭── 📋 *COMANDOS EN MONGODB* ──╮\n╰─────────────────────────────╯\n\n`;
-                    cmds.forEach(c => {
-                        lista += `• \`.${c.nombre}\`\n`;
-                    });
-                    lista += `\n> _Usa \`.delset <nombre>\` para remover uno._`;
-                    await sock.sendMessage(remitente, { text: lista });
-                    return;
-                }
-
-                // ==========================================
-                // COMANDOS DE CONTROL DE GRUPOS
-                // ==========================================
-                if (texto === '.grupos' && esAdministrador) {
-                    try {
-                        const grupos = await sock.groupFetchAllParticipating();
-                        let respuesta = `╭── 📋 *GRUPOS ACTIVOS CLICK&CUT* ──╮\n╰────────────────────────────╯\n\n`;
-                        for (const id in grupos) {
-                            respuesta += `┌─ 🔹 *${grupos[id].subject}*\n│ \`ID:\` \`${id}\`\n└────────────────────────────\n`;
-                        }
-                        respuesta += `\n> _Usa \`.abrir <id>\` o \`.cerrar <id>\` para gestionarlos._`;
-                        await sock.sendMessage(remitente, { text: respuesta });
-                    } catch (e) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ *No pude obtener la lista de grupos.*' });
-                    }
-                    return;
-                }
-
-                if (texto.startsWith('.cerrar') && esAdministrador) {
-                    const partes = textoOriginal.trim().split(/\s+/);
-                    let targetJid = esGrupo ? remitente : partes[1];
-                    try {
-                        await sock.groupSettingUpdate(targetJid, 'announcement');
-                        await sock.sendMessage(targetJid, { text: '🔒 *Grupo cerrado por la administración.*' });
-                    } catch (err) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ Error al cerrar el grupo.' });
-                    }
-                    return;
-                }
-
-                if (texto.startsWith('.abrir') && esAdministrador) {
-                    const partes = textoOriginal.trim().split(/\s+/);
-                    let targetJid = esGrupo ? remitente : partes[1];
-                    try {
-                        await sock.groupSettingUpdate(targetJid, 'not_announcement');
-                        await sock.sendMessage(targetJid, { text: '🔓 *Grupo abierto por la administración.*' });
-                    } catch (err) {
-                        await sock.sendMessage(remitente, { text: '> ⚠️ Error al abrir el grupo.' });
-                    }
-                    return;
-                }
-
-                // ==========================================
-                // MENÚ PÚBLICO Y COMANDOS OFICIALES
+                // MENÚ PRINCIPAL
                 // ==========================================
                 if (['.menu', '.ayuda'].includes(texto)) {
                     const menu = 
-`╭─── 🛒 *CLICK & CUT TIENDA* 🛒 ───╮
-│  ✨ *CATÁLOGO DE SERVICIOS* ✨
+`╭─── 🖤 *CLICK & CUT DIGITAL* 🤍 ───╮
+│    *CATÁLOGO Y SERVICIOS 2026*
 ╰─────────────────────────────╯
 
 > 💡 _Escribe cualquiera de los siguientes comandos:_
 
-┌─ 🍿 *ENTRETENIMIENTO*
-│ • \`.stock\` ➜ Stock completo y actualizado 🩷
-│ • \`.catalogo\` ➜ Resumen rápido de todo
-│ • \`.combos\` ➜ Combos y Dúos Tiernos
-│ • \`.streaming\` ➜ Solo TV y Pantallas
-│ • \`.musica\` ➜ Spotify, YouTube, Apple Music, Deezer
-│ • \`.apps\` ➜ Canva Pro, IA, CapCut y Office
+┌─ 🍿 *STREAMING & ENTRETENIMIENTO*
+│ • \`.stock\` ➜ Todo el catálogo con precios completos
+│ • \`.streaming\` ➜ Netflix, Disney, Max, Prime, Vix, IPTV...
+│ • \`.musica\` ➜ Spotify, YouTube, Apple Music, Deezer...
+│ • \`.apps\` ➜ Canva Pro, CapCut, Picsart, Office 365...
+│ • \`.ia\` ➜ ChatGPT, Gemini, IA Fiesta...
+│ • \`.adultos\` ➜ Brazzers y Pornhub (+18)
 └─────────────────────────────
 
 ┌─ 📋 *GESTIÓN Y TRÁMITES*
-│ • \`.tramites\` ➜ Actas, licencias, SAT y más
-│ • \`.medicos\` ➜ Recetas, notas e incapacidades
-│ • \`.recargas\` ➜ Saldo con precio especial
-│ • \`.numeros\` ➜ Números virtuales activos
-└─────────────────────────────
-
-┌─ 📁 *EXTRAS & DIGITAL*
-│ • \`.extras\` ➜ Mangas, películas, APKs y Canva
-│ • \`.libros\` ➜ Mega Pack 1000 PDFs
-│ • \`.diamantes\` ➜ Free Fire y Pase Booyah
+│ • \`.tramites\` ➜ Actas de nacimiento, RFC, CURP, IMSS
+│ • \`.recargas\` ➜ Saldo y paquetes con descuento
 │ • \`.redes\` ➜ Seguidores, likes y vistas
-│ • \`.adultos\` ➜ Contenido +18 exclusivo
 └─────────────────────────────
 
-┌─ ℹ️ *INFORMACIÓN Y ATENCIÓN*
-│ • \`.pago\` ➜ Datos bancarios / transferencias
-│ • \`.contacto\` ➜ Canales oficiales y redes
-│ • \`.garantia\` ➜ Cobertura y reposiciones
-│ • \`.dudas\` ➜ Preguntas frecuentes
-│ • \`.horario\` ➜ Horarios de entrega
-│ • \`.reglas\` ➜ Condiciones de uso
-│ • \`.asesor\` ➜ Soporte humano directo
+┌─ ℹ️ *INFORMACIÓN & ATENCIÓN*
+│ • \`.pago\` ➜ Cuentas para transferir (Spin / STP)
+│ • \`.contacto\` ➜ Canales y redes sociales oficiales
+│ • \`.asesor\` ➜ Atención con la dueña / soporte humano
 └─────────────────────────────
 
-> 🌸 _Escribe el comando con punto para recibir la información._`;
+🎀 _Escribe el comando con punto para recibir la información._`;
                     await sock.sendMessage(remitente, { text: menu });
                     return;
                 }
 
-                if (texto === '.catalogo' || texto === '.streaming' || texto === '.stock') {
+                // ==========================================
+                // CATÁLOGOS ESPECÍFICOS DERIVADOS DEL STOCK
+                // ==========================================
+                if (['.stock', '.catalogo'].includes(texto)) {
                     const stockEnBD = await ComandoModel.findOne({ nombre: 'stock' });
-                    const contenidoStock = stockEnBD ? stockEnBD.contenido : STOCK_DEFAULT;
-                    await sock.sendMessage(remitente, { text: contenidoStock });
+                    await sock.sendMessage(remitente, { text: stockEnBD ? stockEnBD.contenido : STOCK_DEFAULT });
                     return;
                 }
 
-                if (['.contacto'].includes(texto)) {
-                    const contacto = 
-`╭── 📱✨ *CANALES OFICIALES* ✨📱 ──╮
-│   *ATENCIÓN AL CLIENTE CLICK&CUT*
-╰─────────────────────────────╯
+                if (texto === '.streaming') {
+                    const streamingMsg = 
+`🎬 *STREAMING & PANTALLAS CLICK&CUT* 🍿
+━━━━━━━━━━━━━━━━━━
+• *Netflix Premium:* Perfil 1M $45 | 3M $85 | 12M $150 (Completa: 1M $55)
+• *Netflix Privado:* Perfil 1M $55 | 3M $85 | 12M $165 (Completa: 1M $65)
+• *Netflix Extra Bug:* Perfil 1M $40 | 3M $65 | 12M $100 (Completa: 1M $45)
+• *Disney+ Premium:* Perfil 1M $20 | 3M $45 | 12M $85 (Completa: 1M $65)
+• *MAX Premium:* Perfil 1M $25 | 3M $45 | 12M $75 (Completa: 1M $50)
+• *Prime Video:* Perfil 1M $25 | 3M $35 | 12M $55 (Completa: 1M $35)
+• *HBO Max Platino:* Perfil 1M $25 | 3M $45 (Completa: 1M $75)
+• *ViX Premium:* Perfil 1M $14 | 3M $32 (Completa: 1M $20)
+• *Paramount+:* Perfil 1M $20 | 3M $35 (Completa: 1M $55)
+• *Crunchyroll:* Perfil 1M $20 | 3M $35 (Completa: 1M $55)
+• *Apple TV:* Perfil 1M $23 | 3M $39 (Completa: 1M $55)
+• *IPTV Canales:* Perfil 1M $26 | 3M $40 (Completa: 1M $50)
+• *Claro Video / Canales:* 1M $30 | Con Canales: 1M $75
+• *MUBI:* Perfil 1M $20 | Completa 1M $50
+• *Universal+:* Perfil 1M $25 | Completa 1M $45
+• *DAZN + NFL:* Perfil 1M $38 | 3M $55
+• *Viki Rakuten:* Perfil 1M $25 | Completa 1M $65
+• *Kocowa:* Perfil 1M $20 | Completa 1M $30
 
-┌─ 💬 *WHATSAPP OFICIAL*
-│ • \`+52 864 111 4514\`
-└─────────────────────────────
-
-┌─ 🌸 *REDES SOCIALES*
-│ • \`Facebook Click&Cut:\`
-│   https://www.facebook.com/share/1Eb5bH7FRe/?mibextid=wwXIfr
-│ • \`Facebook Personal:\`
-│   https://www.facebook.com/share/1DnL8mn1tK/?mibextid=wwXIfr
-└─────────────────────────────
-
-> 💖 _¡Guarda nuestro número y síguenos para ver promos exclusivas!_`;
-                    await sock.sendMessage(remitente, { text: contacto });
+> 💳 Pide tus datos de pago con *.pago*`;
+                    await sock.sendMessage(remitente, { text: streamingMsg });
                     return;
                 }
 
-                if (['.pago'].includes(texto)) {
+                if (texto === '.musica') {
+                    const musicaMsg = 
+`🎶 *MÚSICA & AUDIO CLICK&CUT* 🎧
+━━━━━━━━━━━━━━━━━━
+▶️ *YouTube Premium:*
+• Invitación: 1M $18 | 3M $29 | 12M $58
+• Individual: (tus datos) 1M $25 | (mis datos) 1M $30
+• Familiar: (tus datos) 1M $35 | (mis datos) 1M $40
+
+💚 *Spotify Individual:*
+• 1M $45 | 3M $85 | 12M $150
+
+🎵 *Apple Music:*
+• Invitación: 1M $30 | 3M $60 | 12M $95
+• Individual: 1M $45 | 3M $65 | 12M $100
+• Familiar: 1M $60 | 3M $75
+
+🎵 *Deezer:* 1M $22 | 3M $43 | 12M $65
+🎶 *Tidal:* 1M $35 | 3M $45 | 12M $75
+🎧 *Amazon Music:* Invitación 1M $20 | Completa 1M $25
+
+> 💳 Pide tus datos de pago con *.pago*`;
+                    await sock.sendMessage(remitente, { text: musicaMsg });
+                    return;
+                }
+
+                if (texto === '.apps') {
+                    const appsMsg = 
+`🎨 *DISEÑO, APPS & PRODUCTIVIDAD* 💻
+━━━━━━━━━━━━━━━━━━
+🎨 *Canva:* Invitación 1M $15 | 3M $25 | Pro: 1M $25 | 3M $35
+📸 *CapCut Pro:* Acceso 1M $30 | Completa 1M $70
+📸 *Picsart:* Acceso 1M $25 | Completa 1M $60
+🦉 *Duolingo:* Perfil 1M $20 | Completa 1M $35
+📄 *Office 365:* Individual $30 | Invitación $25 | Completa $45 | Familiar $55
+🎮 *Game Pass:* Code $120 | Ultimate $350
+🪷 *VPN Surfshark:* Completa 1M $75 | 3M $95
+🐦‍🔥 *APK Drama Box:* $48
+📚 *Libros PDF:* 1x $20 o 3x $50 | Películas: $20
+
+> 💳 Pide tus datos de pago con *.pago*`;
+                    await sock.sendMessage(remitente, { text: appsMsg });
+                    return;
+                }
+
+                if (texto === '.ia') {
+                    const iaMsg = 
+`🤖 *INTELIGENCIA ARTIFICIAL* 🔮
+━━━━━━━━━━━━━━━━━━
+💬 *ChatGPT Go:* Compartida 1M $65 | Completa $165
+💬 *ChatGPT Plus:* Compartida 1M $85 | Completa 1M $185
+🫧 *Gemini:* Invitación 18M $75
+🔮 *IA Fiesta:* 1M $45 | 12M $145
+
+> 💳 Pide tus datos de pago con *.pago*`;
+                    await sock.sendMessage(remitente, { text: iaMsg });
+                    return;
+                }
+
+                if (['.adultos', '.18', '.xxx'].includes(texto)) {
+                    const adultosMsg = 
+`⚠️ *ADULTOS (+18) CLICK&CUT* 🔥
+━━━━━━━━━━━━━━━━━━
+🔥 *Brazzers:*
+• Perfil: 1M $25 | 3M $33 | 12M $48
+• Completa: 1M $30 | 3M $45 | 12M $55
+
+🔥 *Pornhub:*
+• Perfil: 1M $30 | 3M $45 | 12M $60
+• Completa: 1M $38 | 3M $48 | 12M $70
+
+> 💳 Pide tus datos de pago con *.pago*`;
+                    await sock.sendMessage(remitente, { text: adultosMsg });
+                    return;
+                }
+
+                if (texto === '.pago') {
                     const pago = 
 `╭─── 🌸🪞 *DATOS DE TRANSFERENCIA* 🪞🌸 ───╮
 │       *CLICK & CUT FORMAS DE PAGO*
@@ -891,7 +640,7 @@ _*L I S T A  -  D E  -  C O M A N D O S*_
 └────────────────────────────────
 
 > 💬 *Concepto:* Tu nombre o servicio
-> ⚠️ *Importante:* Al completar la transferencia, envíanos la foto o captura clara de tu comprobante.
+> ⚠️ *Importante:* Al completar el pago envía tu captura clara aquí.
 
 🎀 _¡Muchas gracias por apoyar mi emprendimiento!_`;
                     await sock.sendMessage(remitente, { text: pago });
@@ -900,14 +649,24 @@ _*L I S T A  -  D E  -  C O M A N D O S*_
 
                 if (['.asesor', '.admin'].includes(texto)) {
                     await sock.sendMessage(remitente, {
-                        text: `> 👨‍💻 *Click & Cut Soporte:* En un momento te atiende un asesor humano. Por favor escribe con detalle qué servicio deseas adquirir o adjunta tu comprobante aquí.`
+                        text: `> 👩‍💻 *Click & Cut Soporte:* En un momento te atiendo personalmente. Escribe aquí el servicio que deseas o adjunta tu comprobante.`
                     });
                     return;
                 }
 
-                // ==========================================
-                // BUSCADOR DE COMANDOS EN MONGODB (DINÁMICOS)
-                // ==========================================
+                // Comando para que actualices el stock directamente por WhatsApp sin tocar código
+                if (texto.startsWith('.setstock') && esAdministrador) {
+                    const nuevo = textoOriginal.slice(9).trim();
+                    if (!nuevo) {
+                        await sock.sendMessage(remitente, { text: '⚠️ Escribe el nuevo stock después de `.setstock`' });
+                        return;
+                    }
+                    await ComandoModel.findOneAndUpdate({ nombre: 'stock' }, { contenido: nuevo }, { upsert: true });
+                    await sock.sendMessage(remitente, { text: '✅ Stock actualizado exitosamente en MongoDB Atlas.' });
+                    return;
+                }
+
+                // Buscar comandos personalizados en Mongo (.set)
                 const comandoBuscado = texto.split(/\s+/)[0].replace('.', '');
                 const cmdEncontrado = await ComandoModel.findOne({ nombre: comandoBuscado });
                 if (cmdEncontrado) {
@@ -917,35 +676,28 @@ _*L I S T A  -  D E  -  C O M A N D O S*_
             }
 
             // ==========================================
-            // RESPUESTAS CON IA GEMINI
+            // RESPUESTA AUTOMÁTICA CON IA GEMINI
             // ==========================================
-            if (esPropio) return;
-
-            const mencionado = textoOriginal.includes(`@${NUMERO_BOT}`) || textoOriginal.includes(`@${NUMERO_BOT_ALT}`);
-            const debeResponderIA = !esGrupo || (esGrupo && mencionado);
-
-            if (debeResponderIA) {
-                if (!genAI) return;
-
-                try {
-                    const model = genAI.getGenerativeModel({
-                        model: 'gemini-1.5-flash',
-                        systemInstruction: SYSTEM_INSTRUCTION
-                    });
-
-                    const result = await model.generateContent(textoOriginal);
-                    const responseText = result.response.text();
-
-                    if (responseText) {
-                        await sock.sendMessage(remitente, { text: responseText }, { quoted: msg });
+            if (!esPropio && (!esGrupo || textoOriginal.includes(`@${NUMERO_BOT}`))) {
+                if (genAI) {
+                    try {
+                        const model = genAI.getGenerativeModel({
+                            model: 'gemini-1.5-flash',
+                            systemInstruction: `${SYSTEM_INSTRUCTION}\n\nCatálogo de precios oficial disponible:\n${STOCK_DEFAULT}`
+                        });
+                        const result = await model.generateContent(textoOriginal);
+                        const responseText = result.response.text();
+                        if (responseText) {
+                            await sock.sendMessage(remitente, { text: responseText }, { quoted: msg });
+                        }
+                    } catch (iaError) {
+                        console.error('[ERROR GEMINI]', iaError.message);
                     }
-                } catch (iaError) {
-                    console.error('[ERROR GEMINI]', iaError.message);
                 }
             }
 
         } catch (err) {
-            console.log('[ERROR PROCESANDO MENSAJE]', err.message);
+            console.error('[ERROR GENERAL PROCESANDO]', err.message);
         }
     });
 }
