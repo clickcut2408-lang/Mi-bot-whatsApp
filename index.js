@@ -14,8 +14,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // ==========================================
 // CONFIGURACIÓN Y VARIABLES DE ENTORNO
 // ==========================================
-const NUMERO_BOT = process.env.BOT_PHONE_NUMBER || "5218651265554";
-const NUMERO_ADMIN = "5218641114514";
+const NUMERO_BOT = process.env.BOT_PHONE_NUMBER || "528641265554";
+const NUMERO_ADMIN = "528641114514";
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 
