@@ -3,7 +3,8 @@ import makeWASocket, {
     delay, 
     proto, 
     initAuthCreds, 
-    BufferJSON 
+    BufferJSON,
+    downloadMediaMessage
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import http from 'http';
@@ -11,9 +12,9 @@ import mongoose from 'mongoose';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // ==========================================
-// CONFIGURACIONES Y VARIABLES DE ENTORNO
+// CONFIGURACIÓN Y VARIABLES DE ENTORNO
 // ==========================================
-const NUMERO_BOT = process.env.BOT_PHONE_NUMBER || "528641265554";
+const NUMERO_BOT = process.env.BOT_PHONE_NUMBER || "5218651265554";
 const NUMERO_ADMIN = "5218641114514";
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
@@ -25,7 +26,7 @@ const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 // ==========================================
-// CATÁLOGO DE STOCK OFICIAL
+// STOCK Y CATÁLOGO OFICIAL CLICK&CUT
 // ==========================================
 const STOCK_DEFAULT = `🖤 *CLICK&CUT* 🖤
 🤍TU TIENDA DIGITAL🤍
@@ -242,26 +243,40 @@ const STOCK_DEFAULT = `🖤 *CLICK&CUT* 🖤
 💜 Pregunta antes de transferir 🥰`;
 
 const SYSTEM_INSTRUCTION = `
-Eres la asistente virtual y anfitriona oficial de "Click & Cut".
-Representas a la chica de la marca: dulce, tierna, educada, súper atenta, paciente y muy servicial.
-Hablas siempre en femenino ("encantada de ayudarte", "lista para atenderte").
+Eres la asistente virtual, anfitriona y amiga oficial de "Click & Cut".
+Representas a la chica de la marca: dulce, tierna, educada, súper atenta, paciente, platicadora y muy servicial.
+Hablas siempre en femenino ("encantada de ayudarte", "lista para atenderte", "amiga").
 
-Servicios principales que ofreces:
-1. Streaming Digital: Cuentas y perfiles (Netflix, Disney+, Max, Prime, Vix, Paramount, Spotify, YouTube, Apple Music, Tidal, Amazon Music, IPTV, etc.).
-2. Trámites y servicios digitales: Actas, CURP certificada, RFC/SAT, citas, constancias IMSS/ISSSTE.
-3. Papelería creativa y diseño: Stickers personalizados, etiquetas escolares, libros para colorear.
-4. Apps, Diseño y Gaming: Canva Pro, CapCut, Picsart, ChatGPT, Gemini, Game Pass, Office 365.
-
-Pautas de respuesta:
+Pautas de conversación e interacción en grupos y chats:
+- Responde activamente a cualquier plática casual, saludo, broma, duda o pregunta general que envíen las personas, integrándote a la conversación con carisma y calidez.
 - Tutea con dulzura, educación y respeto.
-- Usa emojis suaves y bonitos (🌸, ✨, 📺, 🍿, 💻, 📄, ✂️, 🎀, 💖).
-- Si preguntan precios, básate en el stock oficial o diles que escriban .stock.
-- Para transferencias y datos bancarios diles que escriban .pago.
-- Para hablar con la dueña/humana diles que escriban .asesor.
+- Usa emojis bonitos y variados (🌸, ✨, 🍿, 💻, 🎀, 💖, 🥰, 📺).
+- Mantén las respuestas naturales, fluidas y concisas para no saturar los grupos de texto enorme.
+- Si alguien pregunta por cuentas, servicios o precios, ayúdale con los precios oficiales de tu stock o invítalos con amor a escribir .stock.
+- Si alguien necesita pagar, recuérdale que puede escribir .pago.
+- Si buscan a la dueña o soporte humano, diles que escriban .asesor.
 `;
 
+// Plantilla de la Ficha de Registro de Pedido
+const FICHA_PEDIDO = 
+`╭─── 🌸🧾 *FICHA DE REGISTRO* 🧾🌸 ───╮
+│        *CLICK & CUT OFICIAL*
+╰────────────────────────────────╯
+
+¡Muchísimas gracias por tu pago! 💖✨
+Para procesar y enviarte tu cuenta de inmediato por privado, por favor completa los siguientes datos respondiendo a este mensaje:
+
+📝 *Nombre completo:* 
+📺 *Servicio / Plataforma:* 
+👤 *Tipo:* (¿Perfil con PIN o Cuenta Completa?)
+⏳ *Meses a adquirir:* (1, 3 o 12 meses)
+📧 *Correo de activación* (si aplica a tus datos):
+
+━━━━━━━━━━━━━━━━━━━━
+🎀 _En cuanto envíes esta ficha completa, la administradora revisará el comprobante y te entregará tus accesos de inmediato por chat privado._`;
+
 // ==========================================
-// MODELOS DE MONGODB
+// ESQUEMAS DE MONGODB
 // ==========================================
 const AuthSchema = new mongoose.Schema({ _id: String, data: String });
 const AuthModel = mongoose.models.WhatsAppAuth || mongoose.model('WhatsAppAuth', AuthSchema);
@@ -272,7 +287,6 @@ const ComandoSchema = new mongoose.Schema({
 });
 const ComandoModel = mongoose.models.Comando || mongoose.model('Comando', ComandoSchema);
 
-// Adaptador de autenticación para MongoDB
 async function useMongoDBAuthState(collectionPrefix = 'auth_session') {
     const writeData = async (data, id) => {
         try {
@@ -331,10 +345,9 @@ async function useMongoDBAuthState(collectionPrefix = 'auth_session') {
     };
 }
 
-// Servidor Web para Render (Keep-Alive)
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Bot Click&Cut en línea 🌸');
+    res.end('Bot Click&Cut activo 24/7 🌸');
 }).listen(PORT, () => {
     console.log(`[HTTP] Servidor en puerto ${PORT}`);
 });
@@ -370,28 +383,24 @@ async function arrancarBot() {
         auth: state,
         printQRInTerminal: false,
         syncFullHistory: false,
-        browser: ['Chrome (Linux)', '', '']
+        browser: ['Ubuntu', 'Chrome', '114.0.5735.198']
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Función segura para pedir el código sin duplicar peticiones
     let codigoSolicitado = false;
     const pedirCodigo = async () => {
         if (codigoSolicitado || sock.authState.creds.registered) return;
         codigoSolicitado = true;
 
         try {
+            await AuthModel.deleteMany({});
             let numero = NUMERO_BOT.replace(/[^0-9]/g, '');
-            // Formato normal de México para Baileys
-            if (numero.startsWith('521') && numero.length === 13) {
-                numero = '52' + numero.slice(3);
-            }
-            console.log(`[CONEXIÓN] Solicitando código de vinculación para: ${numero}...`);
+            console.log(`[CONEXIÓN] Solicitando código para: ${numero}...`);
             const pairingCode = await sock.requestPairingCode(numero);
             console.log('\n=========================================');
             console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCode} <<<`);
-            console.log('Ingrésalo en WhatsApp > Dispositivos vinculados');
+            console.log('Ingrésalo de inmediato en WhatsApp');
             console.log('=========================================\n');
         } catch (err) {
             codigoSolicitado = false;
@@ -399,7 +408,6 @@ async function arrancarBot() {
         }
     };
 
-    // Disparador 1: En cuanto Baileys notifica QR disponible
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -419,7 +427,6 @@ async function arrancarBot() {
         }
     });
 
-    // Disparador 2 (Respaldo): Forzar petición a los 5 segundos si el socket no envió evento QR
     setTimeout(async () => {
         if (!sock.authState.creds.registered && !codigoSolicitado) {
             await pedirCodigo();
@@ -457,6 +464,9 @@ async function arrancarBot() {
         }
     });
 
+    // ==========================================
+    // MANEJO DE MENSAJES E IMÁGENES
+    // ==========================================
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages ? chatUpdate.messages[0] : null;
@@ -471,15 +481,15 @@ async function arrancarBot() {
             if (cuerpo.ephemeralMessage) cuerpo = cuerpo.ephemeralMessage.message;
             if (cuerpo.viewOnceMessage) cuerpo = cuerpo.viewOnceMessage.message;
 
+            const esImagen = !!cuerpo.imageMessage;
             const textoOriginal = cuerpo.conversation ||
                                   cuerpo.extendedTextMessage?.text ||
                                   cuerpo.imageMessage?.caption ||
                                   '';
 
-            if (!textoOriginal) return;
-
             const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT;
 
+            // Encendido y apagado
             if (textoOriginal.trim().toLowerCase() === '.on' && esAdministrador) {
                 botActivo = true;
                 await sock.sendMessage(remitente, { text: '🟢 *Bot activado y respondiendo.*' });
@@ -491,12 +501,65 @@ async function arrancarBot() {
                 return;
             }
             if (!botActivo && !esAdministrador) return;
-
             if (esPropio && !textoOriginal.trim().startsWith('.')) return;
+
+            // =========================================================================
+            // RECONOCIMIENTO AUTOMÁTICO DE COMPROBANTES DE PAGO CON GEMINI VISION
+            // =========================================================================
+            if (esImagen && !esPropio && genAI) {
+                try {
+                    // Descargar el buffer de la imagen enviada
+                    const bufferImagen = await downloadMediaMessage(
+                        msg,
+                        'buffer',
+                        {},
+                        { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage }
+                    );
+
+                    const visionModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+                    const promptComprobante = 
+                        "Analiza esta imagen con precisión. ¿Es un comprobante de pago, transferencia bancaria (BBVA, Spin by Oxxo, Mercado Pago, Banorte, Banamex, etc.), captura de app bancaria o ticket de depósito? Responde ÚNICAMENTE con la palabra 'SI' o 'NO'.";
+
+                    const imagePart = {
+                        inlineData: {
+                            data: bufferImagen.toString('base64'),
+                            mimeType: cuerpo.imageMessage.mimetype || 'image/jpeg'
+                        }
+                    };
+
+                    const visionResult = await visionModel.generateContent([promptComprobante, imagePart]);
+                    const analisis = visionResult.response.text().trim().toUpperCase();
+
+                    if (analisis.includes('SI')) {
+                        // 1. Responder con la ficha al cliente
+                        await sock.sendMessage(remitente, { text: FICHA_PEDIDO }, { quoted: msg });
+
+                        // 2. Notificar inmediatamente al administrador con los datos del cliente
+                        const jidAdmin = `${NUMERO_ADMIN}@s.whatsapp.net`;
+                        const avisoAdmin = 
+`🚨 *¡NUEVO PAGO RECIBIDO!* 🚨
+━━━━━━━━━━━━━━━━━━━━
+👤 *Cliente:* +${remitenteNumero}
+📍 *Lugar:* ${esGrupo ? 'En Grupo' : 'Chat Privado'}
+✨ *Acción:* Se le envió la ficha de registro automáticamente.
+━━━━━━━━━━━━━━━━━━━━`;
+                        await sock.sendMessage(jidAdmin, { text: avisoAdmin });
+                        return; // Detener flujo para no duplicar con respuesta de texto
+                    }
+                } catch (imgError) {
+                    console.error('[ERROR VISION PAGO]', imgError.message);
+                }
+            }
+
+            // Si no hay texto tras evaluar imagen, finalizar
+            if (!textoOriginal || !textoOriginal.trim()) return;
 
             const esComando = textoOriginal.trim().startsWith('.');
             const texto = textoOriginal.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
+            // ==========================================
+            // COMANDOS OFICIALES
+            // ==========================================
             if (esComando) {
                 if (['.menu', '.ayuda'].includes(texto)) {
                     const menu = 
@@ -523,6 +586,7 @@ async function arrancarBot() {
 
 ┌─ ℹ️ *INFORMACIÓN & ATENCIÓN*
 │ • \`.pago\` ➜ Cuentas para transferir (Spin / STP)
+│ • \`.ficha\` ➜ Formato de entrega de cuenta
 │ • \`.contacto\` ➜ Canales y redes sociales oficiales
 │ • \`.asesor\` ➜ Atención con la dueña / soporte humano
 └─────────────────────────────
@@ -535,6 +599,11 @@ async function arrancarBot() {
                 if (['.stock', '.catalogo'].includes(texto)) {
                     const stockEnBD = await ComandoModel.findOne({ nombre: 'stock' });
                     await sock.sendMessage(remitente, { text: stockEnBD ? stockEnBD.contenido : STOCK_DEFAULT });
+                    return;
+                }
+
+                if (texto === '.ficha') {
+                    await sock.sendMessage(remitente, { text: FICHA_PEDIDO }, { quoted: msg });
                     return;
                 }
 
@@ -689,23 +758,23 @@ async function arrancarBot() {
             }
 
             // ==========================================
-            // RESPUESTA AUTOMÁTICA CON IA GEMINI
+            // RESPUESTA AUTOMÁTICA ILIMITADA CON IA GEMINI
             // ==========================================
-            if (!esPropio && (!esGrupo || textoOriginal.includes(`@${NUMERO_BOT}`))) {
-                if (genAI) {
-                    try {
-                        const model = genAI.getGenerativeModel({
-                            model: 'gemini-1.5-flash',
-                            systemInstruction: `${SYSTEM_INSTRUCTION}\n\nCatálogo de precios oficial disponible:\n${STOCK_DEFAULT}`
-                        });
-                        const result = await model.generateContent(textoOriginal);
-                        const responseText = result.response.text();
-                        if (responseText) {
-                            await sock.sendMessage(remitente, { text: responseText }, { quoted: msg });
-                        }
-                    } catch (iaError) {
-                        console.error('[ERROR GEMINI]', iaError.message);
+            if (!esPropio && genAI) {
+                try {
+                    const model = genAI.getGenerativeModel({
+                        model: 'gemini-1.5-flash',
+                        systemInstruction: `${SYSTEM_INSTRUCTION}\n\nCatálogo de precios oficial disponible:\n${STOCK_DEFAULT}`
+                    });
+
+                    const result = await model.generateContent(textoOriginal);
+                    const responseText = result.response.text();
+
+                    if (responseText && responseText.trim()) {
+                        await sock.sendMessage(remitente, { text: responseText }, { quoted: msg });
                     }
+                } catch (iaError) {
+                    console.error('[ERROR GEMINI]', iaError.message);
                 }
             }
 
