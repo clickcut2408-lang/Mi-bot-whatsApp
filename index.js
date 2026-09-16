@@ -10,8 +10,10 @@ import http from 'http';
 import mongoose from 'mongoose';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Números de control y entorno
-const NUMERO_BOT = process.env.BOT_PHONE_NUMBER || "5218641265554";
+// ==========================================
+// CONFIGURACIONES Y VARIABLES DE ENTORNO
+// ==========================================
+const NUMERO_BOT = process.env.BOT_PHONE_NUMBER || "528641265554";
 const NUMERO_ADMIN = "5218641114514";
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
@@ -23,7 +25,7 @@ const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 // ==========================================
-// NUEVO STOCK ACTUALIZADO
+// CATÁLOGO DE STOCK OFICIAL
 // ==========================================
 const STOCK_DEFAULT = `🖤 *CLICK&CUT* 🖤
 🤍TU TIENDA DIGITAL🤍
@@ -350,7 +352,6 @@ async function arrancarBot() {
         await mongoose.connect(MONGO_URI);
         console.log('✅ [BD] Conexión establecida con MongoDB Atlas');
 
-        // Actualizar el stock base en MongoDB siempre con el catálogo más reciente
         await ComandoModel.findOneAndUpdate(
             { nombre: 'stock' },
             { contenido: STOCK_DEFAULT },
@@ -374,22 +375,26 @@ async function arrancarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    if (!sock.authState.creds.registered) {
-        setTimeout(async () => {
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        // Solicita el código justo cuando el socket de Baileys está listo
+        if (qr && !sock.authState.creds.registered) {
             try {
-                const numeroLimpio = NUMERO_BOT.replace(/[^0-9]/g, '');
-                const pairingCode = await sock.requestPairingCode(numeroLimpio);
+                let numero = NUMERO_BOT.replace(/[^0-9]/g, '');
+                // Ajuste automático de prefijo si viene con formato 521
+                if (numero.startsWith('521') && numero.length === 13) {
+                    numero = '52' + numero.slice(3);
+                }
+                const pairingCode = await sock.requestPairingCode(numero);
                 console.log('\n=========================================');
                 console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCode} <<<`);
                 console.log('=========================================\n');
             } catch (err) {
                 console.error('[ERROR CODIGO VINCULACION]', err.message);
             }
-        }, 6000);
-    }
+        }
 
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const debeReconectar = statusCode !== DisconnectReason.loggedOut;
@@ -402,7 +407,6 @@ async function arrancarBot() {
         }
     });
 
-    // Bienvenida automática a grupos
     sock.ev.on('group-participants.update', async (update) => {
         try {
             const { id, participants, action } = update;
@@ -434,7 +438,6 @@ async function arrancarBot() {
         }
     });
 
-    // Manejo de mensajes entrantes
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages ? chatUpdate.messages[0] : null;
@@ -458,7 +461,6 @@ async function arrancarBot() {
 
             const esAdministrador = esPropio || remitenteNumero === NUMERO_ADMIN || remitenteNumero === NUMERO_BOT;
 
-            // Encendido y apagado
             if (textoOriginal.trim().toLowerCase() === '.on' && esAdministrador) {
                 botActivo = true;
                 await sock.sendMessage(remitente, { text: '🟢 *Bot activado y respondiendo.*' });
@@ -477,9 +479,6 @@ async function arrancarBot() {
             const texto = textoOriginal.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
             if (esComando) {
-                // ==========================================
-                // MENÚ PRINCIPAL
-                // ==========================================
                 if (['.menu', '.ayuda'].includes(texto)) {
                     const menu = 
 `╭─── 🖤 *CLICK & CUT DIGITAL* 🤍 ───╮
@@ -514,9 +513,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // ==========================================
-                // CATÁLOGOS ESPECÍFICOS DERIVADOS DEL STOCK
-                // ==========================================
                 if (['.stock', '.catalogo'].includes(texto)) {
                     const stockEnBD = await ComandoModel.findOne({ nombre: 'stock' });
                     await sock.sendMessage(remitente, { text: stockEnBD ? stockEnBD.contenido : STOCK_DEFAULT });
@@ -654,7 +650,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // Comando para que actualices el stock directamente por WhatsApp sin tocar código
                 if (texto.startsWith('.setstock') && esAdministrador) {
                     const nuevo = textoOriginal.slice(9).trim();
                     if (!nuevo) {
@@ -666,7 +661,6 @@ async function arrancarBot() {
                     return;
                 }
 
-                // Buscar comandos personalizados en Mongo (.set)
                 const comandoBuscado = texto.split(/\s+/)[0].replace('.', '');
                 const cmdEncontrado = await ComandoModel.findOne({ nombre: comandoBuscado });
                 if (cmdEncontrado) {
