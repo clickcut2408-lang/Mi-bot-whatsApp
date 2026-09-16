@@ -375,24 +375,36 @@ async function arrancarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // Función segura para pedir el código sin duplicar peticiones
+    let codigoSolicitado = false;
+    const pedirCodigo = async () => {
+        if (codigoSolicitado || sock.authState.creds.registered) return;
+        codigoSolicitado = true;
+
+        try {
+            let numero = NUMERO_BOT.replace(/[^0-9]/g, '');
+            // Formato normal de México para Baileys
+            if (numero.startsWith('521') && numero.length === 13) {
+                numero = '52' + numero.slice(3);
+            }
+            console.log(`[CONEXIÓN] Solicitando código de vinculación para: ${numero}...`);
+            const pairingCode = await sock.requestPairingCode(numero);
+            console.log('\n=========================================');
+            console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCode} <<<`);
+            console.log('Ingrésalo en WhatsApp > Dispositivos vinculados');
+            console.log('=========================================\n');
+        } catch (err) {
+            codigoSolicitado = false;
+            console.error('[ERROR CODIGO VINCULACION]', err.message);
+        }
+    };
+
+    // Disparador 1: En cuanto Baileys notifica QR disponible
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // Solicita el código justo cuando el socket de Baileys está listo
         if (qr && !sock.authState.creds.registered) {
-            try {
-                let numero = NUMERO_BOT.replace(/[^0-9]/g, '');
-                // Ajuste automático de prefijo si viene con formato 521
-                if (numero.startsWith('521') && numero.length === 13) {
-                    numero = '52' + numero.slice(3);
-                }
-                const pairingCode = await sock.requestPairingCode(numero);
-                console.log('\n=========================================');
-                console.log(`>>> TU CODIGO DE VINCULACION ES: ${pairingCode} <<<`);
-                console.log('=========================================\n');
-            } catch (err) {
-                console.error('[ERROR CODIGO VINCULACION]', err.message);
-            }
+            await pedirCodigo();
         }
 
         if (connection === 'close') {
@@ -406,6 +418,13 @@ async function arrancarBot() {
             console.log('\n✅ BOT CLICK&CUT CONECTADO A WHATSAPP ✅\n');
         }
     });
+
+    // Disparador 2 (Respaldo): Forzar petición a los 5 segundos si el socket no envió evento QR
+    setTimeout(async () => {
+        if (!sock.authState.creds.registered && !codigoSolicitado) {
+            await pedirCodigo();
+        }
+    }, 5000);
 
     sock.ev.on('group-participants.update', async (update) => {
         try {
