@@ -1,18 +1,18 @@
 {
-  "name": "clickcut-whatsapp-bot",
+  "name": "bot-clickit",
   "version": "1.0.0",
-  "description": "Bot oficial de WhatsApp para Click & Cut",
+  "description": "WhatsApp Bot 24/7 en Render",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": "20.x"
-  },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@whiskeysockets/baileys": "^6.7.9",
-    "mongoose": "^8.2.1",
-    "pino": "^8.19.0"
+    "@whiskeysockets/baileys": "^6.7.12",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongoose": "^8.3.0",
+    "pino": "^9.0.0"
   }
 }
